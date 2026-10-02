@@ -47,6 +47,7 @@ import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -76,13 +77,28 @@ private data class Closed(val url: String, val title: String, val spaceId: Strin
 @SuppressLint("SetJavaScriptEnabled")
 class Browser(private val activity: ComponentActivity, private val scope: CoroutineScope) {
 
-    private val store = Store(activity, scope)
+    /** Holds the profile list; also the data folder of the guest (no profile). */
+    private val root = Store(activity, scope)
+    private val stores = HashMap<String, Store>()
+    /** The active profile's data. */
+    private var store = root
     private val main = Handler(Looper.getMainLooper())
+    val sync = GoogleSync(activity)
 
     val multiProfile: Boolean = runCatching { WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE) }.getOrDefault(false)
     private val docStartScripts = runCatching { WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) }.getOrDefault(false)
 
     // ---- persistent state ----
+    val profiles = mutableStateListOf<UserProfile>()
+    /** The active profile, or null for the guest. */
+    var profileId by mutableStateOf<String?>(null)
+        private set
+    val profile: UserProfile? get() = profiles.firstOrNull { it.id == profileId }
+    var syncing by mutableStateOf(false)
+        private set
+    private var pushJob: Job? = null
+    /** True while remote data is being applied, so it isn't reported as a local change. */
+    private var applyingRemote = false
     val spaces = mutableStateListOf<Space>()
     val tabs = mutableStateListOf<Tab>()
     val history = mutableStateListOf<HistoryEntry>()
@@ -149,6 +165,28 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
 
     fun load() {
         Images.init(activity)
+        root.readObject("profiles")?.let { o ->
+            o.optJSONArray("list")?.let { a -> for (i in 0 until a.length()) profiles += UserProfile.fromJson(a.getJSONObject(i)) }
+            profileId = o.optString("active").takeIf { id -> profiles.any { it.id == id } }
+        }
+        store = storeFor(profileId)
+        loadData()
+        // Ghost tabs never survive a restart, so any ghost data left by a killed process goes now.
+        wipeGhosts()
+
+        scope.launch {
+            while (true) {
+                delay(1000)
+                tick()
+            }
+        }
+        syncNow()
+    }
+
+    private fun storeFor(id: String?): Store = if (id == null) root else stores.getOrPut(id) { Store(activity, scope, "p/$id") }
+
+    /** Reads the active profile's data from [store]. */
+    private fun loadData() {
         store.readObject("settings")?.let { settings = Settings.fromJson(it) }
         val savedSpaces = store.readArray("spaces")?.let { a -> List(a.length()) { Space.fromJson(a.getJSONObject(it)) } }
         spaces.addAll(savedSpaces?.takeIf { it.isNotEmpty() } ?: Space.Defaults)
@@ -177,15 +215,6 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
             currentId = t.id
         }
         // The current tab's WebView is created by the UI once it is attached (see BrowserScreen).
-        // Ghost tabs never survive a restart, so any ghost data left by a killed process goes now.
-        wipeGhosts()
-
-        scope.launch {
-            while (true) {
-                delay(1000)
-                tick()
-            }
-        }
     }
 
     private fun tick() {
@@ -218,21 +247,25 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     private fun saveSpaces() {
         val snap = spaces.toList()
         store.write("spaces") { JSONArray().apply { snap.forEach { put(it.toJson()) } }.toString() }
+        changed()
     }
 
     private fun saveHistory() {
         val snap = history.toList()
         store.write("history", 1500) { JSONArray().apply { snap.forEach { put(it.toJson()) } }.toString() }
+        changed()
     }
 
     private fun savePins() {
         val snap = pins.toList()
         store.write("pins") { JSONArray().apply { snap.forEach { put(it.toJson()) } }.toString() }
+        changed()
     }
 
     private fun saveZaps() {
         val snap = zaps.toMap()
         store.write("zaps") { JSONObject().apply { snap.forEach { (k, v) -> put(k, JSONArray(v)) } }.toString() }
+        changed()
     }
 
     private fun saveStats() {
@@ -246,12 +279,15 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         settings = s
         store.write("settings") { s.toJson().toString() }
         tabs.forEach { t -> t.webView?.let { applyWebSettings(it, t) } }
+        changed()
     }
 
     fun onPause() {
         foreground = false
         current?.webView?.onPause()
         saveSession()
+        // Don't leave changes waiting for the debounce: the app may not come back.
+        if (pushJob?.isActive == true) syncNow()
     }
 
     fun onResume() {
@@ -407,8 +443,11 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         notify("Moved to ${spaces.firstOrNull { it.id == spaceId }?.name}")
     }
 
-    private fun profileName(spaceId: String, ghost: Boolean) = when {
-        ghost -> "kv_ghost"
+    private fun profileName(spaceId: String, ghost: Boolean) = if (ghost) "kv_ghost" else webProfile(profileId, spaceId)
+
+    /** The WebView cookie jar for a space; every browser profile has its own set. */
+    private fun webProfile(profile: String?, spaceId: String) = when {
+        profile != null -> "kv_p${profile}_$spaceId"
         spaceId == Space.DEFAULT_ID -> Profile.DEFAULT_PROFILE_NAME
         else -> "kv_space_$spaceId"
     }
@@ -448,6 +487,211 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         }
         tabsIn(spaceId).forEach { it.webView?.clearCache(true) }
         notify("Data cleared")
+    }
+
+    // =====================================================================================
+    // Profiles & Google sync
+    // =====================================================================================
+
+    private fun saveProfiles() {
+        val snap = profiles.toList()
+        val active = profileId
+        root.write("profiles") {
+            JSONObject().put("active", active).put("list", JSONArray().apply { snap.forEach { put(it.toJson()) } }).toString()
+        }
+    }
+
+    private fun updateProfile(id: String, change: (UserProfile) -> UserProfile) {
+        val i = profiles.indexOfFirst { it.id == id }
+        if (i < 0) return
+        profiles[i] = change(profiles[i])
+        saveProfiles()
+    }
+
+    private fun newProfileId() = UUID.randomUUID().toString().take(8)
+
+    fun addLocalProfile(name: String) {
+        val p = UserProfile(newProfileId(), name.ifBlank { "Profile" })
+        profiles += p
+        saveProfiles()
+        switchProfile(p.id)
+    }
+
+    /** Picks a Google account, asks for Drive access and opens (or restores) its profile. */
+    fun addGoogleProfile() {
+        scope.launch {
+            val email = sync.pickAccount() ?: return@launch
+            profiles.firstOrNull { it.email.equals(email, ignoreCase = true) }?.let { return@launch switchProfile(it.id) }
+            try {
+                val token = sync.token(email, interactive = true) ?: return@launch notify("Google access wasn't allowed")
+                val name = sync.displayName(token) ?: email.substringBefore('@')
+                val p = UserProfile(newProfileId(), name, email)
+                profiles += p
+                saveProfiles()
+                switchProfile(p.id)
+            } catch (e: SyncException) {
+                notify(e.message ?: "Couldn't sign in")
+            } catch (e: Exception) {
+                notify("Couldn't sign in")
+            }
+        }
+    }
+
+    fun renameProfile(id: String, name: String) = updateProfile(id) { it.copy(name = name.ifBlank { it.name }) }
+
+    /** Removes a profile and its data from this device. Its Google copy stays, so it can be added again. */
+    fun removeProfile(id: String) {
+        val p = profiles.firstOrNull { it.id == id } ?: return
+        if (profileId == id) switchProfile(null)
+        val s = storeFor(id)
+        val spaceIds = s.readArray("spaces")?.let { a -> List(a.length()) { a.getJSONObject(it).optString("id") } }
+            ?: Space.Defaults.map { it.id }
+        s.wipe()
+        stores.remove(id)
+        profiles.remove(p)
+        saveProfiles()
+        if (multiProfile) main.postDelayed({
+            spaceIds.forEach { sid -> runCatching { ProfileStore.getInstance().deleteProfile(webProfile(id, sid)) } }
+        }, 800)
+        notify("${p.name} removed from this device")
+    }
+
+    /** Switches to another profile (null = guest): every tab, space and setting is swapped out. */
+    fun switchProfile(id: String?) {
+        if (id == profileId || (id != null && profiles.none { it.id == id })) return
+        if (pushJob?.isActive == true) syncNow()
+        saveSession()
+        closePeek()
+        exitFullscreen()
+        closeFind()
+        reader = null
+        linkMenu = null
+        tabs.forEach { destroyWebView(it) }
+        tabs.clear(); spaces.clear(); history.clear(); pins.clear(); zaps.clear(); shieldsOff.clear(); closed.clear()
+        wipeGhosts()
+        flowUntil = 0L; flowBypass.clear()
+        settings = Settings(); totalBlocked = 0L; flowMinutesTotal = 0
+        currentId = null; currentSpaceId = Space.DEFAULT_ID
+        profileId = id
+        saveProfiles()
+        store = storeFor(id)
+        loadData()
+        notify(profile?.let { "Switched to ${it.name}" } ?: "Browsing as guest")
+        syncNow()
+    }
+
+    /** Local data that's worth backing up changed; send it to Google a little later. */
+    private fun changed() {
+        if (applyingRemote) return
+        val p = profile ?: return
+        updateProfile(p.id) { it.copy(changedAt = System.currentTimeMillis()) }
+        if (!p.google) return
+        pushJob?.cancel()
+        pushJob = scope.launch {
+            delay(20_000)
+            syncNow()
+        }
+    }
+
+    /**
+     * Syncs the active Google profile: the newer side wins. With [interactive], Google may ask
+     * the user to sign in again, and the outcome is shown.
+     */
+    fun syncNow(interactive: Boolean = false) {
+        val p = profile?.takeIf { it.google } ?: return
+        if (syncing) return
+        pushJob?.cancel()
+        // Snapshot now: the user may switch profiles before the network answers.
+        val local = syncBundle(p.changedAt)
+        syncing = true
+        scope.launch {
+            var pulled = false
+            try {
+                val token = sync.token(p.email!!, interactive)
+                if (token == null) {
+                    notify("Sign in to sync ${p.name}", "Sign in") { syncNow(interactive = true) }
+                    return@launch
+                }
+                val remote = sync.download(token)
+                val remoteAt = remote?.optLong("updated") ?: 0L
+                when {
+                    remote != null && remoteAt > p.changedAt -> if (profileId == p.id) {
+                        pulled = true
+                        applySyncBundle(remote)
+                        updateProfile(p.id) { it.copy(changedAt = remoteAt, syncedAt = System.currentTimeMillis()) }
+                    }
+                    remote == null || p.changedAt > remoteAt -> {
+                        sync.upload(token, local)
+                        updateProfile(p.id) { it.copy(syncedAt = System.currentTimeMillis()) }
+                    }
+                    else -> updateProfile(p.id) { it.copy(syncedAt = System.currentTimeMillis()) }
+                }
+                if (interactive) notify("${p.name} is up to date")
+            } catch (e: SyncException) {
+                if (interactive) notify(e.message ?: "Couldn't sync")
+            } catch (e: Exception) {
+                if (interactive) notify("Couldn't sync")
+            } finally {
+                syncing = false
+                // Changed again while uploading: go round once more, later.
+                val latest = profiles.firstOrNull { it.id == p.id }
+                if (!pulled && profileId == p.id && latest != null && latest.changedAt > p.changedAt && pushJob?.isActive != true) changed()
+            }
+        }
+    }
+
+    /** What's saved to Google: everything except open tabs, logins and counters. */
+    private fun syncBundle(updated: Long): JSONObject = JSONObject()
+        .put("v", 1)
+        .put("updated", updated)
+        .put("settings", settings.toJson())
+        .put("spaces", JSONArray().apply { spaces.forEach { put(it.toJson()) } })
+        .put("pins", JSONArray().apply { pins.forEach { put(it.toJson()) } })
+        .put("zaps", JSONObject().apply { zaps.forEach { (k, v) -> put(k, JSONArray(v)) } })
+        .put("shieldsOff", JSONArray(shieldsOff.toList()))
+        .put("history", JSONArray().apply { history.take(SYNCED_HISTORY).forEach { put(it.toJson()) } })
+
+    private fun applySyncBundle(o: JSONObject) {
+        applyingRemote = true
+        try {
+            o.optJSONObject("settings")?.let { updateSettings(Settings.fromJson(it)) }
+            o.optJSONArray("spaces")?.let { a ->
+                val remote = List(a.length()) { Space.fromJson(a.getJSONObject(it)) }
+                if (remote.isEmpty()) return@let
+                // Keep local spaces that still have open tabs, so no tab is orphaned.
+                val keep = spaces.filter { s -> remote.none { it.id == s.id } && tabsIn(s.id).isNotEmpty() }
+                spaces.clear()
+                spaces.addAll(remote + keep)
+                if (spaces.none { it.id == currentSpaceId }) currentSpaceId = spaces.first().id
+                saveSpaces()
+            }
+            o.optJSONArray("pins")?.let { a ->
+                pins.clear()
+                for (i in 0 until a.length()) pins += Pin.fromJson(a.getJSONObject(i))
+                savePins()
+            }
+            o.optJSONObject("zaps")?.let { z ->
+                zaps.clear()
+                z.keys().forEach { k -> val a = z.getJSONArray(k); zaps[k] = List(a.length()) { a.getString(it) } }
+                saveZaps()
+            }
+            o.optJSONArray("shieldsOff")?.let { a ->
+                shieldsOff.clear()
+                for (i in 0 until a.length()) shieldsOff += a.getString(i)
+                saveStats()
+            }
+            o.optJSONArray("history")?.let { a ->
+                val merged = (List(a.length()) { HistoryEntry.fromJson(a.getJSONObject(it)) } + history)
+                    .distinctBy { it.url to it.time }
+                    .sortedByDescending { it.time }
+                    .take(3000)
+                history.clear()
+                history.addAll(merged)
+                saveHistory()
+            }
+        } finally {
+            applyingRemote = false
+        }
     }
 
     // =====================================================================================
@@ -579,6 +823,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         val site = tab.pageHost?.let(Url::site) ?: return
         if (site in shieldsOff) shieldsOff.remove(site) else shieldsOff.add(site)
         saveStats()
+        changed()
         tab.webView?.reload()
     }
 
@@ -623,12 +868,12 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         notify(label)
     }
 
-    fun togglePin(url: String, title: String) {
+    fun togglePin(url: String, title: String, quiet: Boolean = false) {
         val existing = pins.indexOfFirst { it.url.trimEnd('/') == url.trimEnd('/') }
         if (existing >= 0) {
-            pins.removeAt(existing); notify("Removed from favorites")
+            pins.removeAt(existing); if (!quiet) notify("Removed from favorites")
         } else {
-            pins.add(0, Pin(url, title.ifBlank { Url.pretty(url) })); notify("Added to favorites")
+            pins.add(0, Pin(url, title.ifBlank { Url.pretty(url) })); if (!quiet) notify("Added to favorites")
         }
         savePins()
     }
@@ -728,14 +973,17 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     }
 
     // =====================================================================================
-    // Search suggestions (DuckDuckGo autocomplete; no cookies, no identifiers)
+    // Search suggestions (Google's or DuckDuckGo's autocomplete; no cookies, no identifiers)
     // =====================================================================================
 
     suspend fun suggestions(query: String, ghost: Boolean = false): List<String> = withContext(Dispatchers.IO) {
         if (ghost || !settings.suggestions || query.isBlank() || query.startsWith(">")) return@withContext emptyList()
         runCatching {
             val q = URLEncoder.encode(query, "UTF-8")
-            val conn = URL("https://ac.duckduckgo.com/ac/?q=$q&type=list").openConnection() as HttpURLConnection
+            val endpoint = if (settings.engine == SearchEngine.GOOGLE) "https://suggestqueries.google.com/complete/search?client=firefox&ie=UTF-8&oe=UTF-8&q=$q"
+            else "https://ac.duckduckgo.com/ac/?q=$q&type=list"
+            val conn = URL(endpoint).openConnection() as HttpURLConnection
+            conn.useCaches = false
             conn.connectTimeout = 3000
             conn.readTimeout = 3000
             val text = conn.inputStream.bufferedReader().use { it.readText() }
@@ -1093,6 +1341,9 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     }
 
     companion object {
+        /** How much history is backed up to Google. */
+        private const val SYNCED_HISTORY = 500
+
         fun parseCssColor(raw: String): Color? {
             val s = raw.trim().lowercase()
             if (s.isEmpty()) return null

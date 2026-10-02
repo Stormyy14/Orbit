@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AutoFixHigh
 import androidx.compose.material.icons.outlined.Close
@@ -117,7 +118,9 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
             add(Command("Hide elements", "Remove parts of this page", Icons.Outlined.AutoFixHigh, "zap block remove") { browser.toggleZap() })
             add(Command("Focus", "Block distracting sites", Icons.Outlined.Timer, "flow pomodoro timer") { open(SheetKind.Flow) })
             add(Command("Shields", "Tracker blocking", Icons.Outlined.Shield, "privacy block ads") { open(SheetKind.Shields) })
-            add(Command("Spaces", "Switch or edit spaces", Icons.Outlined.Layers, "profiles containers") { open(SheetKind.Spaces) })
+            add(Command("Spaces", "Switch or edit spaces", Icons.Outlined.Layers, "containers") { open(SheetKind.Spaces) })
+            add(Command("Profiles", "Switch profile or sign in with Google", Icons.Outlined.AccountCircle, "account google sync login user") { open(SheetKind.Profiles) })
+            add(Command("Add sites", "Put sites on the orbit", Icons.Outlined.Star, "orbit quick add favorites") { open(SheetKind.QuickAdd) })
             add(Command("Tab history", "Pages visited in this tab", Icons.Outlined.History, "trail back") { open(SheetKind.Trail) })
             add(Command("Desktop site", "Request the desktop version", Icons.Outlined.DesktopWindows, "request desktop") { browser.toggleDesktop() })
             add(Command("Share", "Send this page", Icons.Outlined.Share, "send") { browser.share() })
@@ -193,6 +196,8 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
                             onSpaces = { open(SheetKind.Spaces) },
                             onFlow = { open(SheetKind.Flow) },
                             onShields = { open(SheetKind.Shields) },
+                            onProfiles = { open(SheetKind.Profiles) },
+                            onAddSites = { open(SheetKind.QuickAdd) },
                         )
                     }
                     if (tab?.flowBlocked != null) FlowInterstitial(tab)
@@ -266,6 +271,8 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
             SheetKind.Flow -> FlowSheet { sheet = null }
             SheetKind.Settings -> SettingsSheet { sheet = null }
             SheetKind.Trail -> TrailSheet(tab) { sheet = null }
+            SheetKind.Profiles -> ProfilesSheet { sheet = null }
+            SheetKind.QuickAdd -> QuickAddSheet { sheet = null }
             null -> Unit
         }
         if (browser.linkMenu != null) LinkMenu { browser.linkMenu = null }

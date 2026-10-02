@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.orbitline.core.Images
 import app.orbitline.core.Url
+import app.orbitline.core.UserProfile
 
 // ---------------------------------------------------------------------------------------------
 // Haptics — the one place Orbit is "loud": a tick confirms every gesture.
@@ -130,6 +133,22 @@ fun SiteIcon(url: String, size: Dp, favicon: ImageBitmap? = null, shape: Shape =
         } else {
             val letter = (if (host.isNotEmpty()) Url.site(host) else url).firstOrNull()?.uppercaseChar() ?: '·'
             Text(letter.toString(), color = Orb.Text2, fontWeight = FontWeight.SemiBold, fontSize = (size.value * 0.42f).sp, fontFamily = Geist)
+        }
+    }
+}
+
+/** A profile's initial in a circle; the guest gets a plain person. */
+@Composable
+fun ProfileBadge(profile: UserProfile?, size: Dp, tint: Color = Orb.Text) {
+    Box(
+        Modifier.size(size).clip(CircleShape).border(1.dp, Orb.BorderStrong, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (profile == null) {
+            Icon(Icons.Outlined.Person, null, tint = tint, modifier = Modifier.size(size * 0.58f))
+        } else {
+            val letter = profile.name.firstOrNull { it.isLetterOrDigit() }?.uppercaseChar() ?: '·'
+            Text(letter.toString(), color = tint, fontWeight = FontWeight.SemiBold, fontSize = (size.value * 0.44f).sp, fontFamily = Geist)
         }
     }
 }

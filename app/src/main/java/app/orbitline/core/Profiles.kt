@@ -1,0 +1,184 @@
+package app.orbitline.core
+
+import android.accounts.Account
+import android.accounts.AccountManager
+import androidx.activity.ComponentActivity
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.AuthorizationResult
+import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.Scopes
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
+import com.google.android.gms.common.api.Scope
+import com.google.android.gms.tasks.Task
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+/**
+ * A browser profile: its own spaces, favorites, history, settings and logins.
+ * A profile with an [email] is backed up to that Google account (see [GoogleSync]).
+ */
+data class UserProfile(
+    val id: String,
+    val name: String,
+    val email: String? = null,
+    /** Last time this profile's data changed on this device. */
+    val changedAt: Long = 0L,
+    /** Last successful sync with Google, 0 if never. */
+    val syncedAt: Long = 0L,
+) {
+    val google: Boolean get() = email != null
+
+    fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("email", email)
+        .put("changed", changedAt).put("synced", syncedAt)
+
+    companion object {
+        fun fromJson(o: JSONObject) = UserProfile(
+            id = o.getString("id"),
+            name = o.optString("name", "Profile"),
+            email = o.optString("email").takeIf { it.isNotBlank() && it != "null" },
+            changedAt = o.optLong("changed"),
+            syncedAt = o.optLong("synced"),
+        )
+    }
+}
+
+class SyncException(message: String) : Exception(message)
+
+/**
+ * Saves a profile to the hidden app folder of the user's own Google Drive (free; it counts a few
+ * KB against their storage). Sign-in uses Play services authorization, so no client secret ships
+ * with the app: Google matches the app by package name and signing certificate.
+ */
+class GoogleSync(private val activity: ComponentActivity) {
+
+    private val client = Identity.getAuthorizationClient(activity)
+    private var onPicked: ((String?) -> Unit)? = null
+    private var onConsent: ((AuthorizationResult?) -> Unit)? = null
+
+    // Registered while the activity is being created (the Browser is built in onCreate).
+    private val picker = activity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        onPicked?.invoke(r.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME))
+        onPicked = null
+    }
+    private val consent = activity.registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { r ->
+        onConsent?.invoke(runCatching { client.getAuthorizationResultFromIntent(r.data) }.getOrNull())
+        onConsent = null
+    }
+
+    /** Shows the system account picker; returns the chosen Google account's email. */
+    suspend fun pickAccount(): String? = suspendCancellableCoroutine { c ->
+        onPicked = { c.resume(it) }
+        val intent = AccountManager.newChooseAccountIntent(null, null, arrayOf(ACCOUNT_TYPE), null, null, null, null)
+        runCatching { picker.launch(intent) }.onFailure { onPicked = null; c.resume(null) }
+    }
+
+    /**
+     * An access token for [email]. With [interactive] the consent screen may be shown;
+     * without it, returns null when the user has to approve access again.
+     */
+    suspend fun token(email: String, interactive: Boolean): String? {
+        val request = AuthorizationRequest.builder()
+            .setRequestedScopes(listOf(Scope(DRIVE_APPDATA), Scope(Scopes.EMAIL), Scope(Scopes.PROFILE)))
+            .setAccount(Account(email, ACCOUNT_TYPE))
+            .build()
+        val result = try {
+            client.authorize(request).await()
+        } catch (e: ApiException) {
+            throw SyncException(
+                if (e.statusCode == CommonStatusCodes.DEVELOPER_ERROR) "Google sign-in isn't set up for this build"
+                else "Couldn't reach your Google account",
+            )
+        }
+        if (!result.hasResolution()) return result.accessToken
+        if (!interactive) return null
+        val pending = result.pendingIntent ?: return null
+        val approved = suspendCancellableCoroutine { c ->
+            onConsent = { c.resume(it) }
+            runCatching { consent.launch(IntentSenderRequest.Builder(pending.intentSender).build()) }
+                .onFailure { onConsent = null; c.resume(null) }
+        }
+        return approved?.accessToken
+    }
+
+    /** The account's display name. */
+    suspend fun displayName(token: String): String? = withContext(Dispatchers.IO) {
+        runCatching { JSONObject(request("GET", "https://www.googleapis.com/oauth2/v3/userinfo", token)).optString("given_name") }
+            .getOrNull()?.takeIf { it.isNotBlank() }
+    }
+
+    /** The saved profile, or null if this account has none yet. */
+    suspend fun download(token: String): JSONObject? = withContext(Dispatchers.IO) {
+        val id = fileId(token) ?: return@withContext null
+        JSONObject(request("GET", "$API/files/$id?alt=media", token))
+    }
+
+    suspend fun upload(token: String, data: JSONObject) = withContext(Dispatchers.IO) {
+        val body = data.toString()
+        val id = fileId(token)
+        if (id != null) {
+            // HttpURLConnection can't send PATCH; Google APIs accept the override header.
+            request("POST", "$UPLOAD/files/$id?uploadType=media", token, body, "application/json", override = "PATCH")
+        } else {
+            val boundary = "orbit" + System.nanoTime()
+            val meta = JSONObject().put("name", FILE).put("parents", org.json.JSONArray().put("appDataFolder"))
+            val multipart = "--$boundary\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n$meta\r\n" +
+                "--$boundary\r\nContent-Type: application/json\r\n\r\n$body\r\n--$boundary--"
+            request("POST", "$UPLOAD/files?uploadType=multipart", token, multipart, "multipart/related; boundary=$boundary")
+        }
+        Unit
+    }
+
+    private fun fileId(token: String): String? {
+        val q = URLEncoder.encode("name='$FILE'", "UTF-8")
+        val list = JSONObject(request("GET", "$API/files?spaces=appDataFolder&q=$q&fields=files(id)", token))
+        return list.optJSONArray("files")?.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() }
+    }
+
+    private fun request(method: String, url: String, token: String, body: String? = null, type: String? = null, override: String? = null): String {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = method
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 20_000
+            conn.useCaches = false
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            override?.let { conn.setRequestProperty("X-HTTP-Method-Override", it) }
+            if (body != null) {
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", type)
+                conn.outputStream.use { it.write(body.toByteArray()) }
+            }
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                throw SyncException(if (code == 401 || code == 403) "Google refused access to Drive" else "Google Drive error $code")
+            }
+            return conn.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private suspend fun <T> Task<T>.await(): T = suspendCancellableCoroutine { c ->
+        addOnSuccessListener { c.resume(it) }
+        addOnFailureListener { c.resumeWithException(it) }
+        addOnCanceledListener { c.cancel() }
+    }
+
+    companion object {
+        private const val ACCOUNT_TYPE = "com.google"
+        private const val DRIVE_APPDATA = "https://www.googleapis.com/auth/drive.appdata"
+        private const val API = "https://www.googleapis.com/drive/v3"
+        private const val UPLOAD = "https://www.googleapis.com/upload/drive/v3"
+        private const val FILE = "orbit-profile.json"
+    }
+}

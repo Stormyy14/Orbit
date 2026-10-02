@@ -69,16 +69,16 @@ data class Pin(val url: String, val title: String) {
 }
 
 enum class SearchEngine(val label: String, val template: String, val suggest: Boolean = true) {
+    GOOGLE("Google", "https://www.google.com/search?q=%s"),
     DUCKDUCKGO("DuckDuckGo", "https://duckduckgo.com/?q=%s"),
     BRAVE("Brave Search", "https://search.brave.com/search?q=%s"),
-    GOOGLE("Google", "https://www.google.com/search?q=%s"),
     STARTPAGE("Startpage", "https://www.startpage.com/do/search?q=%s"),
     ECOSIA("Ecosia", "https://www.ecosia.org/search?q=%s"),
     BING("Bing", "https://www.bing.com/search?q=%s"),
 }
 
 data class Settings(
-    val engine: SearchEngine = SearchEngine.DUCKDUCKGO,
+    val engine: SearchEngine = SearchEngine.GOOGLE,
     val suggestions: Boolean = true,
     val shields: Boolean = true,
     val hideCookieBanners: Boolean = true,
@@ -93,6 +93,7 @@ data class Settings(
     ),
 ) {
     fun toJson(): JSONObject = JSONObject()
+        .put("v", VERSION)
         .put("engine", engine.name)
         .put("suggestions", suggestions)
         .put("shields", shields)
@@ -105,10 +106,15 @@ data class Settings(
         .put("flow", JSONArray(flowDomains))
 
     companion object {
+        /** 2: Google became the default engine; older files get it once. */
+        private const val VERSION = 2
+
         fun fromJson(o: JSONObject): Settings {
             val d = Settings()
+            val engine = if (o.optInt("v") < 2) d.engine
+            else runCatching { SearchEngine.valueOf(o.getString("engine")) }.getOrDefault(d.engine)
             return Settings(
-                engine = runCatching { SearchEngine.valueOf(o.getString("engine")) }.getOrDefault(d.engine),
+                engine = engine,
                 suggestions = o.optBoolean("suggestions", d.suggestions),
                 shields = o.optBoolean("shields", d.shields),
                 hideCookieBanners = o.optBoolean("cookies", d.hideCookieBanners),

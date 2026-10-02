@@ -1,9 +1,10 @@
 # Privacy policy
 
-_Last updated: 2 October 2026_
+_Last updated: 2 October 2026 (0.6.0)_
 
-Orbitline is a web browser. It has **no accounts, no analytics, no ads, no crash reporting and
-no servers of its own**. The developer receives no data from the app.
+Orbitline is a web browser. It has **no analytics, no ads, no crash reporting and no servers
+of its own**. The developer receives no data from the app. Accounts are optional: you can add a
+Google profile (see below) to back up your profile to your own Google Drive.
 
 ## What stays on your phone
 
@@ -26,7 +27,8 @@ Settings → Data, or uninstall the app to remove everything.
 | When | Sent to | What |
 |---|---|---|
 | You visit a website | That website (and anything it loads) | A normal browser request. Third-party trackers on the blocklist and third-party cookies are blocked while Shields is on. |
-| You type in the address bar with "Show search suggestions" on (not in ghost tabs) | DuckDuckGo (`ac.duckduckgo.com`) | The text you typed, to get suggestions. No cookies or identifiers are sent. You can turn this off in Settings. |
+| You type in the address bar with "Show search suggestions" on (not in ghost tabs) | Google (`suggestqueries.google.com`) when Google is your search engine, otherwise DuckDuckGo (`ac.duckduckgo.com`) | The text you typed, to get suggestions. No cookies or identifiers are sent. You can turn this off in Settings. |
+| You add or use a Google profile | Google (sign-in and Google Drive API) | Your sign-in, and your profile's data (below), stored in the hidden app-data folder of your own Google Drive. Only this app can read it. |
 | You search | The search engine you chose in Settings | Your search, as on any browser. |
 | The start page shows a site you haven't visited yet | That site | A request for its icon (`/apple-touch-icon.png` or `/favicon.ico`). |
 | You open Reader view | The page's image hosts | Requests for the article's images. |
@@ -34,6 +36,18 @@ Settings → Data, or uninstall the app to remove everything.
 | Safe Browsing check | Google, via Android System WebView | WebView's built-in Safe Browsing uses partial URL hashes to warn about known dangerous sites. |
 
 Orbitline also asks Android System WebView not to send its usage metrics.
+
+## Google profiles (optional)
+
+A profile on this device stays on this device. If you add a **Google profile**, Orbitline asks
+Google for permission to store its own data in your Drive (`drive.appdata`, a hidden folder only
+this app can see) and to read your name and email. It saves one file there, `orbit-profile.json`,
+with that profile's settings, spaces, favorites, hidden elements, shield exceptions and its 500
+most recent history entries. Passwords, cookies, logins and open tabs are never uploaded.
+
+The file is sent directly from your phone to Google with a token Android gives the app; the developer
+never sees it. Removing a profile deletes its data from the phone but not the Drive copy; delete that
+from your Google Account → Data & privacy → Third-party apps, or by revoking Orbitline's access.
 
 ## Permissions
 

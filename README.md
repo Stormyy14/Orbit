@@ -4,7 +4,7 @@
 
 <p align="center">
   A thumb-first Android browser with a quiet, precise interface.<br>
-  Kotlin + Jetpack Compose on Android System WebView. No accounts, no analytics, no ads.
+  Kotlin + Jetpack Compose on Android System WebView. No analytics, no ads; accounts are optional.
 </p>
 
 ## Install on your phone (free)
@@ -35,9 +35,10 @@ Release signing certificate SHA-256:
 
 | Feature | What it does |
 |---|---|
-| **Orbit start page** | Your sites sit on three tilted orbits around the current space. The ones you visit most (and pinned ones) sit on the inner orbit. Drag sideways to spin them: inner orbits turn faster, and sites on the far side are drawn smaller and fainter. |
+| **Orbit start page** | Your sites sit on three tilted orbits around the current space. The ones you visit most (and pinned ones) sit on the inner orbit. It starts empty, with an **Add sites** button to pick sites quickly. Drag sideways to spin them (the near side follows your finger): inner orbits turn faster, and sites on the far side are drawn smaller and fainter. |
+| **Profiles** | Each profile has its own spaces, favorites, history, settings and logins. Without a profile you browse as Guest. A **Google profile** is saved to the hidden app folder of your own Google Drive and restored when you add the same account on another device (logins and open tabs stay on the device). |
 | **Orbit bar** | A floating bottom bar. Swipe ←/→ to switch tabs, ↑ for all tabs, ↓ to reload. Long-press and slide for quick actions (Back, Reload, Reader, New tab, Ghost tab, Forward). |
-| **Search** | One field for URLs, search, `!bangs` (`!yt`, `!w`, `!gh`…), `>commands`, `@spaces`, open tabs and history, plus voice input. |
+| **Search** | Google by default. One field for URLs, search, `!bangs` (`!yt`, `!w`, `!gh`…), `>commands`, `@spaces`, open tabs and history, plus voice input. |
 | **Spaces** | Separate areas (Personal, Work, …), each with its own tabs, history, **cookies and logins** (needs WebView 121+). Each space has an icon you pick. |
 | **Ghost tabs** | Private tabs with their own cookie jar that close themselves after 5–60 minutes in the background. They're kept out of screenshots and the recent-apps preview. |
 | **Preview** | Long-press a link and choose Preview to open it in a card. Swipe up to keep it as a tab (no reload). |

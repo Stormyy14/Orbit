@@ -12,8 +12,8 @@ android {
         applicationId = "io.github.stormyy14.orbitline"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.6.0"
     }
 
     // Release signing comes from ~/.gradle/gradle.properties (never from the repo).
@@ -71,4 +71,5 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.1")
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("com.google.android.gms:play-services-auth:21.3.0")
 }

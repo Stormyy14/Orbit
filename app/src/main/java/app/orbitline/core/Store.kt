@@ -10,10 +10,24 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-/** Tiny JSON-file persistence. Writes are debounced and happen off the main thread. */
-class Store(context: Context, private val scope: CoroutineScope) {
-    private val dir = File(context.filesDir, "orbit").apply { mkdirs() }
+/**
+ * Tiny JSON-file persistence. Writes are debounced and happen off the main thread.
+ * [sub] is a folder under `orbit/`; each profile keeps its data in its own one.
+ */
+class Store(context: Context, private val scope: CoroutineScope, sub: String = "") {
+    private val dir = File(context.filesDir, if (sub.isEmpty()) "orbit" else "orbit/$sub").apply { mkdirs() }
     private val pending = HashMap<String, Job>()
+    @Volatile private var wiped = false
+
+    /** Deletes this store's folder, dropping any writes that haven't happened yet. */
+    fun wipe() {
+        synchronized(pending) {
+            wiped = true
+            pending.values.forEach { it.cancel() }
+            pending.clear()
+        }
+        dir.deleteRecursively()
+    }
 
     fun readObject(name: String): JSONObject? = runCatching {
         File(dir, "$name.json").takeIf { it.exists() }?.readText()?.let(::JSONObject)
@@ -32,10 +46,13 @@ class Store(context: Context, private val scope: CoroutineScope) {
             pending[name]?.cancel()
             pending[name] = scope.launch(Dispatchers.IO) {
                 delay(debounceMs)
+                if (wiped) return@launch
                 val text = produce()
-                val tmp = File(dir, "$name.json.tmp")
-                tmp.writeText(text)
-                tmp.renameTo(File(dir, "$name.json"))
+                runCatching {
+                    val tmp = File(dir, "$name.json.tmp")
+                    tmp.writeText(text)
+                    tmp.renameTo(File(dir, "$name.json"))
+                }
             }
         }
     }

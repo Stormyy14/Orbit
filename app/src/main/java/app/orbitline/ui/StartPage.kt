@@ -41,6 +41,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Timer
@@ -70,31 +71,24 @@ import java.util.Date
 
 data class Favorite(val url: String, val name: String, val pinned: Boolean)
 
-private val Suggested = listOf(
-    Favorite("https://en.wikipedia.org", "Wikipedia", false),
-    Favorite("https://www.youtube.com", "YouTube", false),
-    Favorite("https://github.com", "GitHub", false),
-    Favorite("https://www.reddit.com", "Reddit", false),
-    Favorite("https://news.ycombinator.com", "Hacker News", false),
-    Favorite("https://maps.google.com", "Maps", false),
-    Favorite("https://www.theverge.com", "The Verge", false),
-    Favorite("https://www.bbc.com/news", "BBC News", false),
-    Favorite("https://stackoverflow.com", "Stack Overflow", false),
-    Favorite("https://duckduckgo.com", "DuckDuckGo", false),
-    Favorite("https://open.spotify.com", "Spotify", false),
-    Favorite("https://www.nytimes.com", "NYT", false),
-)
-
 @Composable
-fun StartPage(tab: Tab, onPulse: () -> Unit, onSpaces: () -> Unit, onFlow: () -> Unit, onShields: () -> Unit) {
+fun StartPage(
+    tab: Tab,
+    onPulse: () -> Unit,
+    onSpaces: () -> Unit,
+    onFlow: () -> Unit,
+    onShields: () -> Unit,
+    onProfiles: () -> Unit,
+    onAddSites: () -> Unit,
+) {
     val browser = LocalBrowser.current
     if (tab.ghost) {
         GhostStart(onPulse)
         return
     }
     val space = browser.currentSpace
-    val favorites = remember(browser.history.size, browser.pins.size, space.id) { favorites(browser, space.id) }
-    val recent = remember(browser.history.size, space.id) {
+    val favorites = remember(browser.profileId, browser.history.size, browser.pins.size, space.id) { favorites(browser, space.id) }
+    val recent = remember(browser.profileId, browser.history.size, space.id) {
         browser.history.asSequence().filter { it.spaceId == space.id }
             .distinctBy { it.url.substringBefore('#') }.distinctBy { it.title.ifBlank { it.url } }.take(6).toList()
     }
@@ -135,12 +129,15 @@ fun StartPage(tab: Tab, onPulse: () -> Unit, onSpaces: () -> Unit, onFlow: () ->
                     )
                 }
             }
+            Box(Modifier.size(44.dp).tap(CircleShape) { onProfiles() }, contentAlignment = Alignment.Center) {
+                ProfileBadge(browser.profile, 30.dp, tint = Orb.Text2)
+            }
         }
         Spacer(Modifier.height(20.dp))
         SearchField("Search or type URL", onPulse)
 
         Spacer(Modifier.height(12.dp))
-        OrbitView(favorites, space, onSpaces)
+        OrbitView(favorites, space, onSpaces, onAddSites)
 
         if (recent.isNotEmpty()) {
             Heading("Recently visited", Modifier.padding(top = 8.dp))
@@ -197,10 +194,7 @@ private fun favorites(browser: Browser, spaceId: String): List<Favorite> {
             val h = v.second
             Favorite("https://" + (Url.host(h.url) ?: ""), Url.siteName(h.title, h.url), false)
         }
-    val all = (pinned + frequent).take(ORBIT_CAPACITY)
-    if (all.size >= ORBIT_CAPACITY) return all
-    val fill = Suggested.filter { s -> all.none { Url.sameSite(Url.host(it.url) ?: "", Url.host(s.url) ?: "") } }
-    return (all + fill).take(ORBIT_CAPACITY)
+    return (pinned + frequent).take(ORBIT_CAPACITY)
 }
 
 private const val ORBIT_CAPACITY = 12
@@ -221,10 +215,11 @@ private const val TILT = 0.62f
 /**
  * Your most-visited and pinned sites on three tilted orbits around the current space.
  * Closest friends sit on the inner orbit. Drag sideways to spin; sites on the far side of an
- * orbit are drawn smaller and fainter, and pass behind the centre.
+ * orbit are drawn smaller and fainter, and pass behind the centre. Starts empty, with a button
+ * to add sites.
  */
 @Composable
-private fun OrbitView(items: List<Favorite>, space: app.orbitline.core.Space, onCenter: () -> Unit) {
+private fun OrbitView(items: List<Favorite>, space: app.orbitline.core.Space, onCenter: () -> Unit, onAdd: () -> Unit) {
     val browser = LocalBrowser.current
     val haptics = rememberHaptics()
     val density = LocalDensity.current
@@ -273,7 +268,8 @@ private fun OrbitView(items: List<Favorite>, space: app.orbitline.core.Space, on
                 },
         ) {
             Canvas(Modifier.fillMaxSize()) {
-                rings.indices.forEach { r ->
+                // Empty orbits still show their paths, waiting for sites.
+                (if (items.isEmpty()) RingSizes.indices else rings.indices).forEach { r ->
                     val rx = rxPx * RingRadii[r]
                     val ry = ryPx * RingRadii[r]
                     drawOval(
@@ -307,7 +303,8 @@ private fun OrbitView(items: List<Favorite>, space: app.orbitline.core.Space, on
                 val labelW = nodeDp + 48.dp
                 val labelPx = with(density) { labelW.toPx() }
                 sites.forEachIndexed { i, f ->
-                    val a = RingPhase[r] + i * (2f * PI.toFloat() / sites.size) + spin.value * RingSpeeds[r]
+                    // Minus: the near side of each orbit follows your finger.
+                    val a = RingPhase[r] + i * (2f * PI.toFloat() / sites.size) - spin.value * RingSpeeds[r]
                     val x = cx + rx * cos(a)
                     val y = cy + ry * sin(a)
                     val depth = (sin(a) + 1f) / 2f // 0 = far side, 1 = near side
@@ -351,6 +348,7 @@ private fun OrbitView(items: List<Favorite>, space: app.orbitline.core.Space, on
                             )
                         }
                         DropdownMenu(expanded = menuFor == f, onDismissRequest = { menuFor = null }, containerColor = Orb.Surface) {
+                            DropdownMenuItem(text = { Text("Add sites") }, onClick = { menuFor = null; onAdd() })
                             DropdownMenuItem(text = { Text(if (f.pinned) "Unpin" else "Pin to inner orbit") }, onClick = {
                                 browser.togglePin(f.url, f.name); menuFor = null
                             })
@@ -364,6 +362,16 @@ private fun OrbitView(items: List<Favorite>, space: app.orbitline.core.Space, on
                         }
                     }
                 }
+            }
+
+            if (items.isEmpty()) {
+                PrimaryButton(
+                    "Add sites",
+                    Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp),
+                    icon = Icons.Outlined.Add,
+                ) { onAdd() }
+            } else if (items.size < ORBIT_CAPACITY) {
+                IconButton(Icons.Outlined.Add, "Add sites", Modifier.align(Alignment.TopEnd), tint = Orb.Text2) { haptics.tick(); onAdd() }
             }
         }
     }

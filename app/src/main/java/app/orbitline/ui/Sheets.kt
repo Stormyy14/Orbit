@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
@@ -26,9 +27,11 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Cookie
 import androidx.compose.material.icons.outlined.DarkMode
@@ -49,6 +52,7 @@ import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.VerticalAlignBottom
 import androidx.compose.material.icons.outlined.Vibration
@@ -80,10 +84,11 @@ import app.orbitline.core.Settings
 import app.orbitline.core.Space
 import app.orbitline.core.Tab
 import app.orbitline.core.Url
+import app.orbitline.core.UserProfile
 import java.text.DateFormat
 import java.util.Date
 
-enum class SheetKind { Menu, Shields, Spaces, Flow, Settings, Trail }
+enum class SheetKind { Menu, Shields, Spaces, Flow, Settings, Trail, Profiles, QuickAdd }
 
 private val Flat = RoundedCornerShape(0.dp)
 
@@ -132,6 +137,7 @@ fun PageMenu(tab: Tab?, open: (SheetKind) -> Unit, onDismiss: () -> Unit) {
                 meta = if (browser.flowActive) "until " + DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(browser.flowUntil)) else null,
             ) { act { open(SheetKind.Flow) } }
             MenuRow(spaceIcon(browser.currentSpace.icon), "Spaces", meta = browser.currentSpace.name) { act { open(SheetKind.Spaces) } }
+            MenuRow(Icons.Outlined.AccountCircle, "Profiles", meta = browser.profile?.name ?: "Guest") { act { open(SheetKind.Profiles) } }
             MenuRow(Icons.Outlined.Settings, "Settings") { act { open(SheetKind.Settings) } }
             if (tab != null) {
                 Hairline()
@@ -320,6 +326,207 @@ private fun SpaceEditor(initial: Space?, onSave: (String, String) -> Unit, onDel
         Spacer(Modifier.weight(1f))
         SecondaryButton("Cancel") { onCancel() }
         PrimaryButton("Save", enabled = name.isNotBlank()) { onSave(name.trim(), icon) }
+    }
+}
+
+// =============================================================================================
+// Profiles
+// =============================================================================================
+
+@Composable
+fun ProfilesSheet(onDismiss: () -> Unit) {
+    val browser = LocalBrowser.current
+    var editing by remember { mutableStateOf<UserProfile?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    OrbSheet(onDismiss) {
+        val e = editing
+        if (e != null || creating) {
+            ProfileEditor(
+                initial = e,
+                onSave = { name ->
+                    if (e == null) { browser.addLocalProfile(name); onDismiss() } else browser.renameProfile(e.id, name)
+                    editing = null; creating = false
+                },
+                onRemove = e?.let { p -> { browser.removeProfile(p.id); editing = null } },
+                onCancel = { editing = null; creating = false },
+            )
+            return@OrbSheet
+        }
+        Text("Profiles", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 20.dp, top = 4.dp, bottom = 8.dp))
+        val rowPadding = PaddingValues(start = 20.dp, end = 8.dp, top = 6.dp, bottom = 6.dp)
+        ListRow(
+            title = "Guest",
+            subtitle = "This device only",
+            leading = { ProfileBadge(null, 28.dp) },
+            trailing = {
+                Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                    if (browser.profileId == null) Icon(Icons.Outlined.Check, "Current profile", tint = Orb.Text, modifier = Modifier.size(18.dp))
+                }
+            },
+            contentPadding = rowPadding,
+        ) { browser.switchProfile(null); onDismiss() }
+        browser.profiles.forEach { p ->
+            val selected = p.id == browser.profileId
+            ListRow(
+                title = p.name,
+                subtitle = profileStatus(p, syncing = selected && browser.syncing, now = browser.now),
+                leading = { ProfileBadge(p, 28.dp) },
+                trailing = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (selected) Icon(Icons.Outlined.Check, "Current profile", tint = Orb.Text, modifier = Modifier.size(18.dp))
+                        IconButton(Icons.Outlined.Edit, "Edit ${p.name}", tint = Orb.Text2, size = 40.dp) { editing = p }
+                    }
+                },
+                contentPadding = rowPadding,
+            ) { browser.switchProfile(p.id); onDismiss() }
+        }
+        Hairline()
+        ListRow("Add Google profile", subtitle = "Saved to your Google account", icon = Icons.Outlined.CloudSync) {
+            onDismiss(); browser.addGoogleProfile()
+        }
+        ListRow("Add profile on this device", icon = Icons.Outlined.Add) { creating = true }
+        if (browser.profile?.google == true) {
+            Hairline()
+            ListRow("Sync now", icon = Icons.Outlined.Sync, trailingText = if (browser.syncing) "Syncing" else null) {
+                browser.syncNow(interactive = true)
+            }
+        }
+        Text(
+            "Each profile has its own spaces, favorites, history, settings and logins. Google profiles save everything except logins and open tabs.",
+            style = MaterialTheme.typography.bodySmall, color = Orb.Text2,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+        )
+    }
+}
+
+private fun profileStatus(p: UserProfile, syncing: Boolean, now: Long): String = when {
+    !p.google -> "This device only"
+    syncing -> "Syncing"
+    p.syncedAt == 0L -> p.email!!
+    else -> "${p.email} · synced ${ago(now - p.syncedAt).let { if (it == "now") "just now" else "$it ago" }}"
+}
+
+@Composable
+private fun ProfileEditor(initial: UserProfile?, onSave: (String) -> Unit, onRemove: (() -> Unit)?, onCancel: () -> Unit) {
+    var name by remember { mutableStateOf(initial?.name ?: "") }
+    Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 12.dp)) {
+        Text(if (initial == null) "New profile" else "Edit profile", style = MaterialTheme.typography.titleLarge)
+        initial?.email?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = Orb.Text2) }
+    }
+    Row(
+        Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(48.dp).clip(R12).background(Orb.Field).padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ProfileBadge(if (name.isBlank()) null else UserProfile("", name), 24.dp)
+        Spacer(Modifier.width(12.dp))
+        Box(Modifier.weight(1f)) {
+            if (name.isEmpty()) Text("Name", color = Orb.Text3, style = MaterialTheme.typography.bodyLarge)
+            BasicTextField(
+                name, { name = it.take(24) }, singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = Orb.Text),
+                cursorBrush = SolidColor(Orb.Text), modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+    Row(Modifier.padding(horizontal = 16.dp, vertical = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (onRemove != null) SecondaryButton("Remove", color = Orb.Red) { onRemove() }
+        Spacer(Modifier.weight(1f))
+        SecondaryButton("Cancel") { onCancel() }
+        PrimaryButton(if (initial == null) "Create" else "Save", enabled = name.isNotBlank()) { onSave(name.trim()) }
+    }
+}
+
+// =============================================================================================
+// Quick add: put sites on the orbit
+// =============================================================================================
+
+private val QuickSites = listOf(
+    "https://www.google.com" to "Google",
+    "https://www.youtube.com" to "YouTube",
+    "https://mail.google.com" to "Gmail",
+    "https://maps.google.com" to "Maps",
+    "https://en.wikipedia.org" to "Wikipedia",
+    "https://web.whatsapp.com" to "WhatsApp",
+    "https://www.instagram.com" to "Instagram",
+    "https://x.com" to "X",
+    "https://www.facebook.com" to "Facebook",
+    "https://www.reddit.com" to "Reddit",
+    "https://github.com" to "GitHub",
+    "https://www.linkedin.com" to "LinkedIn",
+    "https://www.netflix.com" to "Netflix",
+    "https://open.spotify.com" to "Spotify",
+    "https://www.amazon.com" to "Amazon",
+    "https://www.bbc.com/news" to "BBC News",
+)
+
+@Composable
+fun QuickAddSheet(onDismiss: () -> Unit) {
+    val browser = LocalBrowser.current
+    val haptics = rememberHaptics()
+    var custom by remember { mutableStateOf("") }
+    OrbSheet(onDismiss) {
+        Text("Add sites", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 20.dp, top = 4.dp))
+        Text(
+            "They sit on the inner orbit of every space.",
+            style = MaterialTheme.typography.bodyMedium, color = Orb.Text2,
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 12.dp),
+        )
+        Column(Modifier.padding(horizontal = 12.dp)) {
+            QuickSites.chunked(4).forEach { row ->
+                Row(Modifier.fillMaxWidth()) {
+                    row.forEach { (url, name) ->
+                        val on = browser.isPinned(url)
+                        Column(
+                            Modifier.weight(1f).padding(2.dp).tap(R12) { haptics.tick(); browser.togglePin(url, name, quiet = true) }.padding(vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Box(contentAlignment = Alignment.BottomEnd) {
+                                Box(
+                                    Modifier
+                                        .size(48.dp)
+                                        .clip(CircleShape)
+                                        .background(Orb.Field)
+                                        .border(if (on) 1.5.dp else 0.dp, if (on) Orb.Text else Color.Transparent, CircleShape),
+                                    contentAlignment = Alignment.Center,
+                                ) { SiteIcon(url, 24.dp, shape = RoundedCornerShape(4.dp), framed = false) }
+                                if (on) {
+                                    Box(
+                                        Modifier.size(18.dp).clip(CircleShape).background(Orb.Contrast),
+                                        contentAlignment = Alignment.Center,
+                                    ) { Icon(Icons.Outlined.Check, "Added", tint = Orb.OnContrast, modifier = Modifier.size(12.dp)) }
+                                }
+                            }
+                            Text(
+                                name, style = MaterialTheme.typography.labelSmall, color = if (on) Orb.Text else Orb.Text2,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().height(48.dp).clip(R12).background(Orb.Field)
+                .padding(start = 14.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val host = Url.host(if (custom.contains("://")) custom else "https://$custom")?.takeIf { it.contains('.') }
+            Box(Modifier.weight(1f)) {
+                if (custom.isEmpty()) Text("Another site, like example.com", color = Orb.Text3, style = MaterialTheme.typography.bodyLarge)
+                BasicTextField(
+                    custom, { custom = it.trim() }, singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = Orb.Text), cursorBrush = SolidColor(Orb.Text),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            IconButton(Icons.Outlined.Add, "Add", enabled = host != null, size = 40.dp) {
+                val url = "https://${host ?: return@IconButton}"
+                if (!browser.isPinned(url)) browser.togglePin(url, Url.siteName("", url), quiet = true)
+                haptics.confirm()
+                custom = ""
+            }
+        }
+        PrimaryButton("Done", Modifier.padding(16.dp).fillMaxWidth()) { onDismiss() }
     }
 }
 
