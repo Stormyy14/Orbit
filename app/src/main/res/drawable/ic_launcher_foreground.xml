@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Orbitline mark: an orbit ring forming an "O", with a moon in its gap. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path
+        android:pathData="M78.246,49.287 A24.700,24.700 0 1 1 58.713,29.754"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="8.320"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M71.466,36.534m-6.760,0a6.760,6.760 0,1 1,13.520,0a6.760,6.760 0,1 1,-13.520,0" />
+</vector>

@@ -1,0 +1,1110 @@
+package app.orbitline.core
+
+import android.annotation.SuppressLint
+import android.app.DownloadManager
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.net.Uri
+import android.net.http.SslError
+import android.os.Bundle
+import android.os.Environment
+import android.os.Handler
+import android.os.Looper
+import android.os.Message
+import android.view.View
+import android.view.ViewGroup
+import android.webkit.CookieManager
+import android.webkit.GeolocationPermissions
+import android.webkit.PermissionRequest
+import android.webkit.SslErrorHandler
+import android.webkit.URLUtil
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.ComponentActivity
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.webkit.Profile
+import androidx.webkit.ProfileStore
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.util.UUID
+
+data class Notice(
+    val text: String,
+    val action: String? = null,
+    val onAction: (() -> Unit)? = null,
+    val id: Long = System.nanoTime(),
+)
+
+data class LinkTarget(val url: String?, val image: String?, val tab: Tab)
+
+private data class Closed(val url: String, val title: String, val spaceId: String)
+
+/**
+ * The browser engine: owns tabs, spaces, WebViews, history and all page-level features.
+ * Lives as long as the activity (config changes are handled in-place, see manifest).
+ */
+@SuppressLint("SetJavaScriptEnabled")
+class Browser(private val activity: ComponentActivity, private val scope: CoroutineScope) {
+
+    private val store = Store(activity, scope)
+    private val main = Handler(Looper.getMainLooper())
+
+    val multiProfile: Boolean = runCatching { WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE) }.getOrDefault(false)
+    private val docStartScripts = runCatching { WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) }.getOrDefault(false)
+
+    // ---- persistent state ----
+    val spaces = mutableStateListOf<Space>()
+    val tabs = mutableStateListOf<Tab>()
+    val history = mutableStateListOf<HistoryEntry>()
+    val pins = mutableStateListOf<Pin>()
+    /** site -> CSS selectors the user zapped away. */
+    val zaps = mutableStateMapOf<String, List<String>>()
+    /** sites where the user switched shields off. */
+    val shieldsOff = mutableStateListOf<String>()
+    var settings by mutableStateOf(Settings())
+        private set
+    var totalBlocked by mutableLongStateOf(0L)
+        private set
+    var flowMinutesTotal by mutableIntStateOf(0)
+        private set
+
+    // ---- live state ----
+    var currentId by mutableStateOf<String?>(null)
+        private set
+    var currentSpaceId by mutableStateOf(Space.DEFAULT_ID)
+        private set
+    val current: Tab? by derivedStateOf { tabs.firstOrNull { it.id == currentId } }
+    val currentSpace: Space by derivedStateOf { spaces.firstOrNull { it.id == currentSpaceId } ?: spaces.firstOrNull() ?: Space.Defaults[0] }
+
+    var now by mutableLongStateOf(System.currentTimeMillis())
+        private set
+    var flowUntil by mutableLongStateOf(0L)
+        private set
+    var flowStartedAt by mutableLongStateOf(0L)
+        private set
+    private val flowBypass = HashMap<String, Long>()
+    val flowActive: Boolean get() = now < flowUntil
+
+    var barCollapsed by mutableStateOf(false)
+    var notice by mutableStateOf<Notice?>(null)
+        private set
+    var peek by mutableStateOf<Tab?>(null)
+        private set
+    var linkMenu by mutableStateOf<LinkTarget?>(null)
+    var reader by mutableStateOf<ReaderDoc?>(null)
+    var findOpen by mutableStateOf(false)
+    var findCurrent by mutableIntStateOf(0)
+        private set
+    var findTotal by mutableIntStateOf(0)
+        private set
+    var customView by mutableStateOf<View?>(null)
+        private set
+    private var customCallback: WebChromeClient.CustomViewCallback? = null
+
+    var foreground = true
+    /** Set by the activity: launches a file picker and reports the chosen URIs. */
+    var fileChooser: ((Intent, (Array<Uri>?) -> Unit) -> Unit)? = null
+
+    private val closed = ArrayDeque<Closed>()
+    private val defaultUa: String = runCatching { WebSettings.getDefaultUserAgent(activity) }.getOrDefault("")
+    private val mobileUa = defaultUa.replace("; wv)", ")").replace(Regex("Version/\\d+\\.\\d+ "), "")
+    private val desktopUa = run {
+        val v = Regex("Chrome/([\\d.]+)").find(defaultUa)?.groupValues?.get(1) ?: "130.0.0.0"
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/$v Safari/537.36"
+    }
+
+    // =====================================================================================
+    // Lifecycle & persistence
+    // =====================================================================================
+
+    fun load() {
+        Images.init(activity)
+        store.readObject("settings")?.let { settings = Settings.fromJson(it) }
+        val savedSpaces = store.readArray("spaces")?.let { a -> List(a.length()) { Space.fromJson(a.getJSONObject(it)) } }
+        spaces.addAll(savedSpaces?.takeIf { it.isNotEmpty() } ?: Space.Defaults)
+        store.readArray("history")?.let { a -> for (i in 0 until a.length()) history += HistoryEntry.fromJson(a.getJSONObject(i)) }
+        store.readArray("pins")?.let { a -> for (i in 0 until a.length()) pins += Pin.fromJson(a.getJSONObject(i)) }
+        store.readObject("zaps")?.let { o ->
+            o.keys().forEach { k -> val a = o.getJSONArray(k); zaps[k] = List(a.length()) { a.getString(it) } }
+        }
+        store.readObject("stats")?.let {
+            totalBlocked = it.optLong("blocked")
+            flowMinutesTotal = it.optInt("flow")
+            it.optJSONArray("shieldsOff")?.let { a -> for (i in 0 until a.length()) shieldsOff += a.getString(i) }
+        }
+        store.readObject("session")?.let { o ->
+            currentSpaceId = o.optString("space", Space.DEFAULT_ID).takeIf { id -> spaces.any { it.id == id } } ?: spaces.first().id
+            val a = o.optJSONArray("tabs") ?: JSONArray()
+            for (i in 0 until a.length()) {
+                val s = SavedTab.fromJson(a.getJSONObject(i))
+                if (spaces.none { it.id == s.spaceId }) continue
+                tabs += Tab(id = s.id, spaceId = s.spaceId, url = s.url, title = s.title)
+            }
+            currentId = o.optString("current").takeIf { id -> tabs.any { it.id == id } }
+        }
+        if (currentId == null) {
+            val t = tabs.lastOrNull { it.spaceId == currentSpaceId } ?: newTab(select = false)
+            currentId = t.id
+        }
+        // The current tab's WebView is created by the UI once it is attached (see BrowserScreen).
+        // Ghost tabs never survive a restart, so any ghost data left by a killed process goes now.
+        wipeGhosts()
+
+        scope.launch {
+            while (true) {
+                delay(1000)
+                tick()
+            }
+        }
+    }
+
+    private fun tick() {
+        now = System.currentTimeMillis()
+        val cur = current
+        if (foreground && cur != null) cur.lastActive = now
+        // Ghost tabs self-destruct after a period without being looked at.
+        val ttl = settings.ghostMinutes * 60_000L
+        tabs.filter { it.ghost && (it !== cur || !foreground) && now - it.lastActive > ttl }
+            .forEach { closeTab(it, undoable = false) }
+        if (flowUntil != 0L && now >= flowUntil) {
+            val mins = ((flowUntil - flowStartedAt) / 60_000L).toInt()
+            flowMinutesTotal += mins
+            flowUntil = 0L
+            saveStats()
+            notify("Focus session finished")
+        }
+    }
+
+    fun saveSession() {
+        val saved = tabs.filter { !it.ghost }.map { SavedTab(it.id, it.spaceId, if (it.showHome) "" else it.url, it.title) }
+        val cur = currentId
+        val space = currentSpaceId
+        store.write("session") {
+            val arr = JSONArray().apply { saved.forEach { put(it.toJson()) } }
+            JSONObject().put("tabs", arr).put("current", cur).put("space", space).toString()
+        }
+    }
+
+    private fun saveSpaces() {
+        val snap = spaces.toList()
+        store.write("spaces") { JSONArray().apply { snap.forEach { put(it.toJson()) } }.toString() }
+    }
+
+    private fun saveHistory() {
+        val snap = history.toList()
+        store.write("history", 1500) { JSONArray().apply { snap.forEach { put(it.toJson()) } }.toString() }
+    }
+
+    private fun savePins() {
+        val snap = pins.toList()
+        store.write("pins") { JSONArray().apply { snap.forEach { put(it.toJson()) } }.toString() }
+    }
+
+    private fun saveZaps() {
+        val snap = zaps.toMap()
+        store.write("zaps") { JSONObject().apply { snap.forEach { (k, v) -> put(k, JSONArray(v)) } }.toString() }
+    }
+
+    private fun saveStats() {
+        val blocked = totalBlocked
+        val flow = flowMinutesTotal
+        val off = shieldsOff.toList()
+        store.write("stats", 2000) { JSONObject().put("blocked", blocked).put("flow", flow).put("shieldsOff", JSONArray(off)).toString() }
+    }
+
+    fun updateSettings(s: Settings) {
+        settings = s
+        store.write("settings") { s.toJson().toString() }
+        tabs.forEach { t -> t.webView?.let { applyWebSettings(it, t) } }
+    }
+
+    fun onPause() {
+        foreground = false
+        current?.webView?.onPause()
+        saveSession()
+    }
+
+    fun onResume() {
+        foreground = true
+        current?.let { it.lastActive = System.currentTimeMillis(); it.webView?.onResume() }
+        tick()
+    }
+
+    fun notify(text: String, action: String? = null, onAction: (() -> Unit)? = null) {
+        notice = Notice(text, action, onAction)
+    }
+
+    fun dismissNotice(n: Notice) {
+        if (notice?.id == n.id) notice = null
+    }
+
+    // =====================================================================================
+    // Tabs
+    // =====================================================================================
+
+    fun tabsIn(spaceId: String): List<Tab> = tabs.filter { !it.ghost && it.spaceId == spaceId }
+    val ghostTabs: List<Tab> get() = tabs.filter { it.ghost }
+
+    private fun groupOf(tab: Tab) = if (tab.ghost) ghostTabs else tabsIn(tab.spaceId)
+
+    fun newTab(
+        url: String = "",
+        spaceId: String = currentSpaceId,
+        ghost: Boolean = false,
+        select: Boolean = true,
+        parent: Tab? = null,
+    ): Tab {
+        val tab = Tab(spaceId = spaceId, ghost = ghost, url = url, parentId = parent?.id)
+        val parentIndex = parent?.let { tabs.indexOf(it) } ?: -1
+        if (parentIndex >= 0) tabs.add(parentIndex + 1, tab) else tabs.add(tab)
+        if (ghost && !multiProfile) notify("Ghost tabs can't get their own cookies on this WebView version")
+        if (select) select(tab) else if (url.isNotEmpty()) tab.title = Url.pretty(url)
+        saveSession()
+        return tab
+    }
+
+    fun select(tab: Tab) {
+        val prev = current
+        if (prev === tab) {
+            if (!tab.showHome) ensureWebView(tab)
+            return
+        }
+        prev?.let { captureThumbnail(it); it.webView?.onPause() }
+        currentId = tab.id
+        if (!tab.ghost) currentSpaceId = tab.spaceId
+        tab.lastActive = System.currentTimeMillis()
+        if (!tab.showHome) ensureWebView(tab)
+        tab.webView?.onResume()
+        barCollapsed = false
+        findOpen = false
+        hibernateIdle()
+        saveSession()
+    }
+
+    /** Switch to the neighbouring tab within the current group; returns false at the edges. */
+    fun switchRelative(delta: Int): Boolean {
+        val cur = current ?: return false
+        val group = groupOf(cur)
+        val target = group.getOrNull(group.indexOf(cur) + delta) ?: return false
+        select(target)
+        return true
+    }
+
+    fun closeTab(tab: Tab, undoable: Boolean = true) {
+        val group = groupOf(tab)
+        val idx = group.indexOf(tab)
+        val wasCurrent = tab.id == currentId
+        if (!tab.ghost && !tab.showHome && tab.url.isNotBlank()) {
+            closed.addFirst(Closed(tab.url, tab.title, tab.spaceId))
+            while (closed.size > 15) closed.removeLast()
+        }
+        tabs.remove(tab)
+        destroyWebView(tab)
+        if (wasCurrent) {
+            val rest = group - tab
+            val next = rest.firstOrNull { it.id == tab.parentId }
+                ?: rest.getOrNull(idx) ?: rest.getOrNull(idx - 1)
+                ?: tabsIn(currentSpaceId).maxByOrNull { it.lastActive }
+            if (next != null) select(next) else newTab()
+        }
+        if (tab.ghost && ghostTabs.isEmpty()) wipeGhosts()
+        if (undoable && !tab.ghost && !tab.showHome) {
+            notify("Tab closed", "Undo") { reopenClosed() }
+        }
+        saveSession()
+    }
+
+    fun closeAll(spaceId: String?, ghosts: Boolean) {
+        val victims = if (ghosts) ghostTabs else tabsIn(spaceId ?: currentSpaceId)
+        victims.forEach { closeTab(it, undoable = false) }
+        if (ghosts) notify("Ghost tabs closed")
+    }
+
+    fun reopenClosed() {
+        val c = closed.removeFirstOrNull() ?: return notify("Nothing to reopen")
+        val spaceId = if (spaces.any { it.id == c.spaceId }) c.spaceId else currentSpaceId
+        newTab(c.url, spaceId = spaceId).also { it.title = c.title }
+    }
+
+    fun burnGhosts() = closeAll(null, ghosts = true)
+
+    // =====================================================================================
+    // Spaces
+    // =====================================================================================
+
+    fun switchSpace(id: String) {
+        if (spaces.none { it.id == id }) return
+        currentSpaceId = id
+        val target = tabsIn(id).maxByOrNull { it.lastActive }
+        if (target != null) select(target) else newTab(spaceId = id)
+        saveSession()
+    }
+
+    fun addSpace(name: String, icon: String): Space {
+        val s = Space(UUID.randomUUID().toString().take(8), name.ifBlank { "Space" }, icon)
+        spaces += s
+        saveSpaces()
+        return s
+    }
+
+    fun updateSpace(space: Space) {
+        val i = spaces.indexOfFirst { it.id == space.id }
+        if (i >= 0) spaces[i] = space
+        saveSpaces()
+    }
+
+    fun deleteSpace(id: String) {
+        if (spaces.size <= 1) return notify("You need at least one space")
+        tabsIn(id).forEach { closeTab(it, undoable = false) }
+        spaces.removeAll { it.id == id }
+        history.removeAll { it.spaceId == id }
+        if (currentSpaceId == id) switchSpace(spaces.first().id)
+        if (multiProfile) main.postDelayed({ runCatching { ProfileStore.getInstance().deleteProfile(profileName(id, false)) } }, 800)
+        saveSpaces(); saveHistory(); saveSession()
+    }
+
+    fun moveTab(tab: Tab, spaceId: String) {
+        if (tab.ghost || tab.spaceId == spaceId) return
+        // A WebView's profile is fixed, so moving a tab re-creates it in the new space's jar.
+        val url = tab.url
+        val wasHome = tab.showHome
+        destroyWebView(tab)
+        tab.savedState = null
+        tab.spaceId = spaceId
+        if (!wasHome && url.isNotBlank() && tab.id == currentId) ensureWebView(tab)
+        if (tab.id == currentId) currentSpaceId = spaceId
+        saveSession()
+        notify("Moved to ${spaces.firstOrNull { it.id == spaceId }?.name}")
+    }
+
+    private fun profileName(spaceId: String, ghost: Boolean) = when {
+        ghost -> "kv_ghost"
+        spaceId == Space.DEFAULT_ID -> Profile.DEFAULT_PROFILE_NAME
+        else -> "kv_space_$spaceId"
+    }
+
+    private fun cookiesFor(tab: Tab?): CookieManager =
+        if (multiProfile && tab != null) {
+            runCatching { ProfileStore.getInstance().getOrCreateProfile(profileName(tab.spaceId, tab.ghost)).cookieManager }
+                .getOrDefault(CookieManager.getInstance())
+        } else CookieManager.getInstance()
+
+    private fun wipeGhosts() {
+        if (!multiProfile) return
+        main.postDelayed({
+            val store = ProfileStore.getInstance()
+            val deleted = runCatching { store.deleteProfile("kv_ghost") }.getOrDefault(false)
+            if (!deleted) runCatching {
+                store.getProfile("kv_ghost")?.let { p ->
+                    p.cookieManager.removeAllCookies(null)
+                    p.webStorage.deleteAllData()
+                }
+            }
+        }, 600)
+    }
+
+    fun clearSpaceData(spaceId: String) {
+        history.removeAll { it.spaceId == spaceId }
+        saveHistory()
+        if (multiProfile) {
+            runCatching {
+                val p = ProfileStore.getInstance().getOrCreateProfile(profileName(spaceId, false))
+                p.cookieManager.removeAllCookies(null)
+                p.webStorage.deleteAllData()
+            }
+        } else {
+            CookieManager.getInstance().removeAllCookies(null)
+            android.webkit.WebStorage.getInstance().deleteAllData()
+        }
+        tabsIn(spaceId).forEach { it.webView?.clearCache(true) }
+        notify("Data cleared")
+    }
+
+    // =====================================================================================
+    // Navigation
+    // =====================================================================================
+
+    fun navigate(input: String, tab: Tab? = current) {
+        val t = tab ?: newTab()
+        val url = Url.resolve(input, settings.engine)
+        if (url.isBlank()) return
+        if (!flowAllows(url)) {
+            t.flowBlocked = url
+            return
+        }
+        t.showHome = false
+        t.url = url
+        t.pageHost = Url.host(url)
+        val wv = ensureWebView(t, loadInitial = false)
+        wv.loadUrl(url)
+        barCollapsed = false
+    }
+
+    fun goBack(tab: Tab? = current): Boolean {
+        val t = tab ?: return false
+        if (t.showHome) return false
+        val wv = t.webView
+        if (wv != null && wv.canGoBack()) {
+            wv.goBack(); return true
+        }
+        if (t.startedFromHome) {
+            t.showHome = true
+            return true
+        }
+        return false
+    }
+
+    fun goForward(tab: Tab? = current) {
+        val t = tab ?: return
+        if (t.showHome && t.webView != null && t.url.isNotBlank()) {
+            t.showHome = false; return
+        }
+        t.webView?.takeIf { it.canGoForward() }?.goForward()
+    }
+
+    fun reload(tab: Tab? = current) {
+        tab?.takeIf { !it.showHome }?.webView?.reload()
+    }
+
+    fun goHome(tab: Tab? = current) {
+        tab?.showHome = true
+    }
+
+    // =====================================================================================
+    // Flow mode
+    // =====================================================================================
+
+    fun startFlow(minutes: Int) {
+        flowStartedAt = System.currentTimeMillis()
+        flowUntil = flowStartedAt + minutes * 60_000L
+        flowBypass.clear()
+        now = flowStartedAt
+        notify("Focus on for $minutes minutes")
+        current?.let { t ->
+            if (!t.showHome && !flowAllows(t.url)) t.flowBlocked = t.url
+        }
+    }
+
+    fun endFlow() {
+        if (flowUntil == 0L) return
+        val mins = ((System.currentTimeMillis() - flowStartedAt) / 60_000L).toInt()
+        flowMinutesTotal += mins
+        flowUntil = 0L
+        saveStats()
+        notify("Focus ended")
+    }
+
+    fun flowAllows(url: String): Boolean {
+        if (!flowActive) return true
+        if (!Url.matchesDomain(url, settings.flowDomains)) return true
+        val site = Url.host(url)?.let(Url::site) ?: return true
+        return (flowBypass[site] ?: 0L) > System.currentTimeMillis()
+    }
+
+    fun allowFlowBypass(tab: Tab, minutes: Int = 5) {
+        val url = tab.flowBlocked ?: return
+        Url.host(url)?.let { flowBypass[Url.site(it)] = System.currentTimeMillis() + minutes * 60_000L }
+        tab.flowBlocked = null
+        navigate(url, tab)
+    }
+
+    // =====================================================================================
+    // Page tools
+    // =====================================================================================
+
+    fun toggleDesktop(tab: Tab? = current) {
+        val t = tab ?: return
+        t.desktop = !t.desktop
+        t.webView?.let { applyWebSettings(it, t); it.reload() }
+        notify(if (t.desktop) "Showing desktop site" else "Showing mobile site")
+    }
+
+    fun toggleZap(tab: Tab? = current) {
+        val t = tab ?: return
+        val wv = t.webView ?: return
+        t.zapMode = !t.zapMode
+        wv.evaluateJavascript(if (t.zapMode) Scripts.ZAP_ON else Scripts.ZAP_OFF, null)
+        if (t.zapMode) notify("Tap something on the page to hide it")
+    }
+
+    private fun addZap(tab: Tab, selector: String) {
+        val site = tab.pageHost?.let(Url::site) ?: return
+        zaps[site] = ((zaps[site] ?: emptyList()) + selector).distinct()
+        saveZaps()
+    }
+
+    fun removeZap(site: String, selector: String?) {
+        val left = if (selector == null) emptyList() else (zaps[site] ?: emptyList()) - selector
+        if (left.isEmpty()) zaps.remove(site) else zaps[site] = left
+        saveZaps()
+        tabs.filter { it.pageHost?.let(Url::site) == site }.forEach { injectPageStyles(it) }
+    }
+
+    fun shieldsOn(tab: Tab?): Boolean {
+        val site = tab?.pageHost?.let(Url::site) ?: return settings.shields
+        return settings.shields && site !in shieldsOff
+    }
+
+    fun toggleSiteShields(tab: Tab) {
+        val site = tab.pageHost?.let(Url::site) ?: return
+        if (site in shieldsOff) shieldsOff.remove(site) else shieldsOff.add(site)
+        saveStats()
+        tab.webView?.reload()
+    }
+
+    fun openReader(tab: Tab? = current) {
+        val t = tab ?: return
+        val wv = t.webView ?: return
+        wv.evaluateJavascript(Scripts.READER) { raw ->
+            val doc = ReaderDoc.parse(Scripts.unwrap(raw), t.url)
+            if (doc != null) reader = doc else notify("Reader isn't available for this page")
+        }
+    }
+
+    fun find(query: String) {
+        val wv = current?.webView ?: return
+        if (query.isEmpty()) {
+            wv.clearMatches(); findTotal = 0; findCurrent = 0
+        } else wv.findAllAsync(query)
+    }
+
+    fun findNext(forward: Boolean) = current?.webView?.findNext(forward)
+
+    fun closeFind() {
+        findOpen = false
+        current?.webView?.clearMatches()
+        findTotal = 0; findCurrent = 0
+    }
+
+    fun share(tab: Tab? = current) {
+        val t = tab ?: return
+        if (t.showHome) return
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, t.url)
+            putExtra(Intent.EXTRA_SUBJECT, t.title)
+        }
+        runCatching { activity.startActivity(Intent.createChooser(send, t.title)) }
+    }
+
+    fun copy(text: String, label: String = "Link copied") {
+        val cm = activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("link", text))
+        notify(label)
+    }
+
+    fun togglePin(url: String, title: String) {
+        val existing = pins.indexOfFirst { it.url.trimEnd('/') == url.trimEnd('/') }
+        if (existing >= 0) {
+            pins.removeAt(existing); notify("Removed from favorites")
+        } else {
+            pins.add(0, Pin(url, title.ifBlank { Url.pretty(url) })); notify("Added to favorites")
+        }
+        savePins()
+    }
+
+    fun isPinned(url: String) = pins.any { it.url.trimEnd('/') == url.trimEnd('/') }
+
+    fun removeHistory(entry: HistoryEntry) {
+        history.remove(entry); saveHistory()
+    }
+
+    fun forgetSite(host: String) {
+        val site = Url.site(host)
+        history.removeAll { Url.host(it.url)?.let(Url::site) == site }
+        pins.removeAll { Url.host(it.url)?.let(Url::site) == site }
+        saveHistory(); savePins()
+    }
+
+    // ---- Peek: preview a link in a floating card without leaving the page ----
+
+    fun openPeek(url: String, from: Tab) {
+        closePeek()
+        val t = Tab(spaceId = from.spaceId, ghost = from.ghost, url = url, parentId = from.id)
+        t.showHome = false
+        t.startedFromHome = false
+        peek = t
+        ensureWebView(t)
+    }
+
+    fun closePeek() {
+        peek?.let { destroyWebView(it) }
+        peek = null
+    }
+
+    fun promotePeek() {
+        val t = peek ?: return
+        peek = null
+        val parentIndex = tabs.indexOfFirst { it.id == t.parentId }
+        if (parentIndex >= 0) tabs.add(parentIndex + 1, t) else tabs.add(t)
+        select(t)
+    }
+
+    fun exitFullscreen() {
+        customCallback?.onCustomViewHidden()
+        customView = null
+        customCallback = null
+    }
+
+    // =====================================================================================
+    // Intents
+    // =====================================================================================
+
+    /** Bumped whenever another app hands us a link, so the UI can close what's in the way. */
+    var externalOpens by mutableIntStateOf(0)
+        private set
+
+    fun handleIntent(intent: Intent?) {
+        intent ?: return
+        if (intent.action in setOf(Intent.ACTION_VIEW, Intent.ACTION_WEB_SEARCH, Intent.ACTION_SEND)) externalOpens++
+        when (intent.action) {
+            Intent.ACTION_VIEW -> intent.dataString?.let { openFromOutside(it) }
+            Intent.ACTION_WEB_SEARCH -> intent.getStringExtra("query")?.let { openFromOutside(it) }
+            Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)?.let { openFromOutside(Url.extract(it) ?: it) }
+        }
+    }
+
+    private fun openFromOutside(input: String) {
+        val cur = current
+        val t = if (cur != null && cur.showHome && !cur.ghost && cur.webView == null) cur else newTab()
+        val resolved = Url.resolve(input, settings.engine)
+        // Other apps may only hand us web pages; anything else becomes a search.
+        navigate(if (resolved.startsWith("https://") || resolved.startsWith("http://")) resolved else Url.search(input, settings.engine), t)
+    }
+
+    private fun openExternal(url: String): Boolean = try {
+        val intent = if (url.startsWith("intent:")) Intent.parseUri(url, Intent.URI_INTENT_SCHEME) else Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        // Only browsable activities of *other* apps, with no URI grants or explicit targets.
+        intent.addCategory(Intent.CATEGORY_BROWSABLE)
+        intent.component = null
+        intent.selector = null
+        intent.clipData = null
+        intent.flags = intent.flags and (
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+            ).inv()
+        if (intent.`package` == activity.packageName) intent.`package` = null
+        try {
+            activity.startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            val fallback = intent.getStringExtra("browser_fallback_url")
+            if (fallback != null && (fallback.startsWith("https://") || fallback.startsWith("http://"))) {
+                current?.let { navigate(fallback, it) }
+            } else notify("No app can open this link")
+        }
+        true
+    } catch (e: Exception) {
+        false
+    }
+
+    // =====================================================================================
+    // Search suggestions (DuckDuckGo autocomplete; no cookies, no identifiers)
+    // =====================================================================================
+
+    suspend fun suggestions(query: String, ghost: Boolean = false): List<String> = withContext(Dispatchers.IO) {
+        if (ghost || !settings.suggestions || query.isBlank() || query.startsWith(">")) return@withContext emptyList()
+        runCatching {
+            val q = URLEncoder.encode(query, "UTF-8")
+            val conn = URL("https://ac.duckduckgo.com/ac/?q=$q&type=list").openConnection() as HttpURLConnection
+            conn.connectTimeout = 3000
+            conn.readTimeout = 3000
+            val text = conn.inputStream.bufferedReader().use { it.readText() }
+            val arr = JSONArray(text)
+            if (arr.length() > 1 && arr.opt(1) is JSONArray) {
+                val list = arr.getJSONArray(1)
+                List(list.length()) { list.getString(it) }
+            } else List(arr.length()) { arr.getJSONObject(it).optString("phrase") }
+        }.getOrDefault(emptyList()).filter { it.isNotBlank() && it != query }.take(5)
+    }
+
+    // =====================================================================================
+    // WebView management
+    // =====================================================================================
+
+    private fun liveTabs() = tabs.filter { it.webView != null }
+
+    /** Keeps memory in check: tabs not used recently are serialized and their WebView freed. */
+    private fun hibernateIdle(maxLive: Int = 6) {
+        val live = liveTabs().filter { it.id != currentId }.sortedBy { it.lastActive }
+        val excess = live.size - (maxLive - 1)
+        if (excess <= 0) return
+        live.take(excess).forEach { t ->
+            val wv = t.webView ?: return@forEach
+            val b = Bundle()
+            runCatching { wv.saveState(b) }
+            t.savedState = b
+            destroyWebView(t)
+        }
+    }
+
+    private fun destroyWebView(tab: Tab) {
+        val wv = tab.webView ?: return
+        tab.webView = null
+        (wv.parent as? ViewGroup)?.removeView(wv)
+        runCatching {
+            wv.stopLoading()
+            wv.loadUrl("about:blank")
+            wv.destroy()
+        }
+    }
+
+    fun ensureWebView(tab: Tab, loadInitial: Boolean = true): WebView {
+        tab.webView?.let { return it }
+        val wv = createWebView(tab)
+        tab.painted = false
+        tab.webView = wv
+        val restored = tab.savedState?.let { runCatching { wv.restoreState(it) }.getOrNull() }
+        tab.savedState = null
+        if (restored == null && loadInitial && tab.url.isNotBlank()) wv.loadUrl(tab.url)
+        return wv
+    }
+
+    private fun applyWebSettings(wv: WebView, tab: Tab) {
+        wv.settings.apply {
+            userAgentString = if (tab.desktop || settings.desktopDefault) desktopUa else mobileUa
+            useWideViewPort = true
+            loadWithOverviewMode = true
+        }
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(wv.settings, settings.darkPages)
+        }
+        // (12) Safe Browsing is on by default; make it explicit so it can't silently regress.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
+            WebSettingsCompat.setSafeBrowsingEnabled(wv.settings, true)
+        }
+        // Third-party cookies are refused whenever Shields is on, and always in ghost tabs.
+        cookiesFor(tab).setAcceptThirdPartyCookies(wv, !tab.ghost && !settings.shields)
+    }
+
+    private fun injectPageStyles(tab: Tab) {
+        val wv = tab.webView ?: return
+        val site = tab.pageHost?.let(Url::site)
+        if (settings.hideCookieBanners && shieldsOn(tab)) wv.evaluateJavascript(Scripts.style("orbit-cookie", Shields.cookieCss), null)
+        val z = site?.let { zaps[it] }.orEmpty()
+        wv.evaluateJavascript(Scripts.style("orbit-zap", Scripts.zapCss(z)), null)
+        if (tab.zapMode) wv.evaluateJavascript(Scripts.ZAP_ON, null)
+    }
+
+    private fun readThemeColor(tab: Tab) {
+        tab.webView?.evaluateJavascript(Scripts.THEME) { raw ->
+            tab.themeColor = parseCssColor(Scripts.unwrap(raw))
+        }
+    }
+
+    fun captureThumbnail(tab: Tab) {
+        val wv = tab.webView ?: return
+        if (tab.showHome || !tab.painted || wv.width == 0 || wv.height == 0 || wv.parent == null) return
+        runCatching {
+            val scale = 0.4f
+            val bmp = Bitmap.createBitmap((wv.width * scale).toInt(), (wv.height * scale).toInt(), Bitmap.Config.RGB_565)
+            val c = Canvas(bmp)
+            c.scale(scale, scale)
+            c.translate(-wv.scrollX.toFloat(), -wv.scrollY.toFloat())
+            wv.draw(c)
+            tab.thumbnail = bmp.asImageBitmap()
+        }
+    }
+
+    private fun recordVisit(tab: Tab, url: String, title: String) {
+        if (tab.ghost || url.startsWith("about:") || url.startsWith("data:")) return
+        val top = history.firstOrNull()
+        if (top != null && top.url == url && top.spaceId == tab.spaceId) {
+            if (title.isNotBlank() && title != top.title) history[0] = top.copy(title = title)
+        } else {
+            history.add(0, HistoryEntry(url, title, System.currentTimeMillis(), tab.spaceId))
+            while (history.size > 3000) history.removeAt(history.lastIndex)
+        }
+        saveHistory()
+    }
+
+    private fun download(tab: Tab, url: String, ua: String?, disposition: String?, mime: String?) {
+        if (!url.startsWith("http")) return notify("Can't download this file")
+        runCatching {
+            val name = URLUtil.guessFileName(url, disposition, mime)
+            val req = DownloadManager.Request(Uri.parse(url)).apply {
+                setMimeType(mime)
+                addRequestHeader("User-Agent", ua)
+                cookiesFor(tab).getCookie(url)?.let { addRequestHeader("Cookie", it) }
+                setTitle(name)
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+            }
+            (activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(req)
+            notify("Downloading $name")
+        }.onFailure { notify("Download failed") }
+    }
+
+    fun downloadUrl(url: String, tab: Tab) = download(tab, url, mobileUa, null, null)
+
+    /**
+     * The only page -> app channel. Messages are accepted only from the top frame of the page the
+     * tab is showing, and only while the user has "Hide elements" switched on.
+     */
+    private fun installBridge(wv: WebView, tab: Tab) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return
+        runCatching {
+            WebViewCompat.addWebMessageListener(wv, "OrbitBridge", setOf("*")) { _, message, sourceOrigin, isMainFrame, _ ->
+                val selector = message.data ?: return@addWebMessageListener
+                if (!isMainFrame || !tab.zapMode) return@addWebMessageListener
+                if (sourceOrigin.host?.lowercase() != tab.pageHost) return@addWebMessageListener
+                if (selector.isNotBlank() && selector.length < 2000) addZap(tab, selector)
+            }
+        }
+    }
+
+    private fun createWebView(tab: Tab): WebView {
+        val wv = WebView(activity)
+        if (multiProfile) runCatching { WebViewCompat.setProfile(wv, profileName(tab.spaceId, tab.ghost)) }
+        wv.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        wv.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            setSupportZoom(true)
+            builtInZoomControls = true
+            displayZoomControls = false
+            setSupportMultipleWindows(true)
+            javaScriptCanOpenWindowsAutomatically = false
+            mediaPlaybackRequiresUserGesture = true
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            allowFileAccess = false
+            allowContentAccess = false
+            if (tab.ghost) cacheMode = WebSettings.LOAD_NO_CACHE
+        }
+        applyWebSettings(wv, tab)
+        installBridge(wv, tab)
+        if (docStartScripts && settings.hideCookieBanners) {
+            runCatching { WebViewCompat.addDocumentStartJavaScript(wv, Scripts.style("orbit-cookie", Shields.cookieCss), setOf("*")) }
+        }
+
+        wv.setFindListener { active, total, done ->
+            if (done && tab.id == currentId) { findCurrent = if (total == 0) 0 else active + 1; findTotal = total }
+        }
+
+        wv.setOnScrollChangeListener { _, _, y, _, oldY ->
+            if (!settings.collapseOnScroll || tab.id != currentId) return@setOnScrollChangeListener
+            val dy = y - oldY
+            if (y <= 0) barCollapsed = false
+            else if (dy > 14) barCollapsed = true
+            else if (dy < -24) barCollapsed = false
+        }
+
+        wv.setOnLongClickListener { v ->
+            val r = (v as WebView).hitTestResult
+            when (r.type) {
+                WebView.HitTestResult.SRC_ANCHOR_TYPE -> {
+                    linkMenu = LinkTarget(r.extra, null, tab); true
+                }
+                WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE -> {
+                    val img = r.extra
+                    val msg = main.obtainMessage()
+                    msg.target = Handler(Looper.getMainLooper()) { m ->
+                        linkMenu = LinkTarget(m.data.getString("url") ?: img, img, tab); true
+                    }
+                    v.requestFocusNodeHref(msg)
+                    true
+                }
+                WebView.HitTestResult.IMAGE_TYPE -> {
+                    linkMenu = LinkTarget(null, r.extra, tab); true
+                }
+                else -> false
+            }
+        }
+
+        wv.setDownloadListener { url, ua, disposition, mime, _ -> download(tab, url, ua, disposition, mime) }
+
+        wv.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                val url = request.url.toString()
+                val scheme = request.url.scheme?.lowercase()
+                if (scheme !in setOf("http", "https", "about", "data", "blob", "javascript")) {
+                    if (scheme == "file" || scheme == "content") return true
+                    // Other apps only open from a tap; anything else has to be confirmed.
+                    if (request.hasGesture()) return openExternal(url)
+                    notify("${Url.pretty(tab.url)} wants to open another app", "Open") { openExternal(url) }
+                    return true
+                }
+                // Pages may not send you to a top-level data: URL (a common phishing trick).
+                if (request.isForMainFrame && scheme == "data") {
+                    notify("Blocked a data: page")
+                    return true
+                }
+                if (request.isForMainFrame && !flowAllows(url)) {
+                    tab.flowBlocked = url
+                    return true
+                }
+                return false
+            }
+
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                if (request.isForMainFrame || !settings.shields) return null
+                val pageSite = tab.pageHost?.let(Url::site)
+                if (pageSite != null && pageSite in shieldsOff) return null
+                val res = Shields.intercept(request.url, tab.pageHost)
+                if (res != null) main.post { tab.blockedCount++; totalBlocked++; saveStats() }
+                return res
+            }
+
+            override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                val newHost = Url.host(url)
+                if (newHost == null || tab.pageHost == null || Url.site(newHost) != Url.site(tab.pageHost!!)) tab.favicon = null
+                tab.url = url
+                tab.pageHost = Url.host(url)
+                tab.loading = true
+                tab.blockedCount = 0
+                tab.zapMode = false
+                if (!url.startsWith("about:")) tab.showHome = false
+                favicon?.let { tab.favicon = it.asImageBitmap() }
+                injectPageStyles(tab)
+            }
+
+            override fun onPageCommitVisible(view: WebView, url: String) {
+                tab.painted = true
+                injectPageStyles(tab)
+                readThemeColor(tab)
+            }
+
+            override fun onPageFinished(view: WebView, url: String) {
+                tab.loading = false
+                tab.painted = true
+                tab.canBack = view.canGoBack()
+                tab.canForward = view.canGoForward()
+                injectPageStyles(tab)
+                readThemeColor(tab)
+                recordVisit(tab, url, view.title ?: "")
+                if (tab.id == currentId) main.postDelayed({ captureThumbnail(tab) }, 600)
+                saveSession()
+            }
+
+            override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
+                if (url.startsWith("about:")) return
+                tab.url = url
+                tab.pageHost = Url.host(url)
+                tab.canBack = view.canGoBack()
+                tab.canForward = view.canGoForward()
+            }
+
+            override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
+                handler.cancel()
+                notify("Connection to ${Url.pretty(error.url)} isn't secure")
+            }
+        }
+
+        wv.webChromeClient = object : WebChromeClient() {
+            override fun onProgressChanged(view: WebView, newProgress: Int) {
+                tab.progress = newProgress
+                if (newProgress == 100) tab.loading = false
+            }
+
+            override fun onReceivedTitle(view: WebView, title: String?) {
+                tab.title = title.orEmpty()
+                if (!tab.ghost && title != null) {
+                    val top = history.firstOrNull()
+                    if (top != null && top.url == view.url) history[0] = top.copy(title = title)
+                }
+            }
+
+            override fun onReceivedIcon(view: WebView, icon: Bitmap?) {
+                icon ?: return
+                tab.favicon = icon.asImageBitmap()
+                // Key by the WebView's own URL: callbacks can arrive after the tab has moved on.
+                if (!tab.ghost) Url.host(view.url)?.let { h -> scope.launch(Dispatchers.IO) { Images.saveIcon(h, icon) } }
+            }
+
+            override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
+                if (!isUserGesture) return false
+                val child = Tab(spaceId = tab.spaceId, ghost = tab.ghost, parentId = tab.id)
+                child.showHome = false
+                child.startedFromHome = false
+                val parentIndex = tabs.indexOf(tab)
+                if (parentIndex >= 0) tabs.add(parentIndex + 1, child) else tabs.add(child)
+                val childView = ensureWebView(child, loadInitial = false)
+                (resultMsg.obj as WebView.WebViewTransport).webView = childView
+                resultMsg.sendToTarget()
+                if (peek === tab) closePeek()
+                select(child)
+                return true
+            }
+
+            override fun onCloseWindow(window: WebView) {
+                tabs.firstOrNull { it.webView === window }?.let { closeTab(it, undoable = false) }
+            }
+
+            override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+                customCallback?.onCustomViewHidden()
+                customView = view
+                customCallback = callback
+            }
+
+            override fun onHideCustomView() {
+                customView = null
+                customCallback = null
+            }
+
+            override fun onShowFileChooser(
+                webView: WebView,
+                filePathCallback: ValueCallback<Array<Uri>>,
+                fileChooserParams: FileChooserParams,
+            ): Boolean {
+                val launcher = fileChooser ?: return false
+                val intent = runCatching { fileChooserParams.createIntent() }.getOrNull() ?: return false
+                launcher(intent) { uris -> filePathCallback.onReceiveValue(uris) }
+                return true
+            }
+
+            override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
+                callback.invoke(origin, false, false)
+            }
+
+            override fun onPermissionRequest(request: PermissionRequest) {
+                request.deny()
+            }
+        }
+        return wv
+    }
+
+    companion object {
+        fun parseCssColor(raw: String): Color? {
+            val s = raw.trim().lowercase()
+            if (s.isEmpty()) return null
+            Regex("rgba?\\(\\s*(\\d+)[,\\s]+(\\d+)[,\\s]+(\\d+)(?:[,\\s/]+([\\d.]+)(%?))?\\s*\\)").find(s)?.let { m ->
+                val (r, g, b) = m.destructured
+                var a = m.groupValues[4].toFloatOrNull() ?: 1f
+                if (m.groupValues[5] == "%") a /= 100f
+                if (a < 0.6f) return null
+                return Color(r.toInt().coerceIn(0, 255), g.toInt().coerceIn(0, 255), b.toInt().coerceIn(0, 255))
+            }
+            val hex = if (Regex("^#[0-9a-f]{3}$").matches(s)) "#" + s.drop(1).map { "$it$it" }.joinToString("") else s
+            return runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrNull()
+        }
+    }
+}

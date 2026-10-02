@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 64" width="600" height="128">
+  <title>Orbitline</title>
+  <g fill="none" stroke="currentColor" stroke-width="6.4" stroke-linecap="round">
+    <path d="M50.651,28.375 A19.000,19.000 0 1 1 35.625,13.349"/>
+  </g>
+  <circle cx="45.435" cy="18.565" r="5.2" fill="currentColor"/>
+  <text x="64" y="44" font-family="Geist, Inter, system-ui, sans-serif" font-weight="600" font-size="34" letter-spacing="-1.2" fill="currentColor">Orbitline</text>
+</svg>
