@@ -81,7 +81,7 @@ object Images {
                 conn.connectTimeout = 4000
                 conn.readTimeout = 4000
                 conn.instanceFollowRedirects = true
-                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) Orbitline")
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) Orbit")
                 if (conn.responseCode != 200) return@runCatching null
                 val bytes = conn.inputStream.use { readCapped(it, 512 shl 10) } ?: return@runCatching null
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
@@ -99,7 +99,7 @@ object Images {
             val conn = URL(url).openConnection() as HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) Orbitline")
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) Orbit")
             val bytes = conn.inputStream.use { readCapped(it, 15 shl 20) } ?: return@runCatching null
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)

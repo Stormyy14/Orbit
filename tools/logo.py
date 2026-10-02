@@ -1,4 +1,4 @@
-"""Orbitline logo: a bold 'O' drawn as an orbit, with a moon sitting in a gap in the ring."""
+"""Orbit logo: a bold 'O' drawn as an orbit, with a moon sitting in a gap in the ring."""
 import math, os
 from PIL import Image, ImageDraw, ImageFont
 
@@ -30,12 +30,12 @@ mx, my = pt(MOON_AT)
 
 # ---------- SVG: mark ----------
 mark_svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <title>Orbitline</title>
+  <title>Orbit</title>
   <path d="{ring_path()}" fill="none" stroke="currentColor" stroke-width="{STROKE}" stroke-linecap="round"/>
   <circle cx="{mx:.3f}" cy="{my:.3f}" r="{MOON_R}" fill="currentColor"/>
 </svg>
 '''
-open(os.path.join(OUT, 'orbitline-mark.svg'), 'w').write(mark_svg)
+open(os.path.join(OUT, 'orbit-mark.svg'), 'w').write(mark_svg)
 
 # ---------- SVG: app icon ----------
 icon_svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="512" height="512">
@@ -44,19 +44,19 @@ icon_svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width
   <circle cx="{mx:.3f}" cy="{my:.3f}" r="{MOON_R}" fill="#FFFFFF"/>
 </svg>
 '''
-open(os.path.join(OUT, 'orbitline-icon.svg'), 'w').write(icon_svg)
+open(os.path.join(OUT, 'orbit-icon.svg'), 'w').write(icon_svg)
 
 # ---------- SVG: horizontal logo ----------
-logo_svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 64" width="600" height="128">
-  <title>Orbitline</title>
+logo_svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 64" width="300" height="128">
+  <title>Orbit</title>
   <g fill="none" stroke="currentColor" stroke-width="{STROKE}" stroke-linecap="round">
     <path d="{ring_path()}"/>
   </g>
   <circle cx="{mx:.3f}" cy="{my:.3f}" r="{MOON_R}" fill="currentColor"/>
-  <text x="64" y="44" font-family="Geist, Inter, system-ui, sans-serif" font-weight="600" font-size="34" letter-spacing="-1.2" fill="currentColor">Orbitline</text>
+  <text x="64" y="44" font-family="Geist, Inter, system-ui, sans-serif" font-weight="600" font-size="34" letter-spacing="-1.2" fill="currentColor">Orbit</text>
 </svg>
 '''
-open(os.path.join(OUT, 'orbitline-logo.svg'), 'w').write(logo_svg)
+open(os.path.join(OUT, 'orbit-logo.svg'), 'w').write(logo_svg)
 
 # ---------- PNG renders (4x supersampled) ----------
 def draw_mark(img, x, y, size, color):
@@ -92,10 +92,10 @@ def render(size, path, bg, fg, radius=None, mark_scale=1.0):
     draw_mark(img, off, off, m, fg)
     img.resize((size, size), Image.LANCZOS).save(path)
 
-render(1024, os.path.join(OUT, 'orbitline-icon-1024.png'), (10, 10, 10, 255), (255, 255, 255, 255), radius=224)
-render(512, os.path.join(OUT, 'orbitline-icon-512.png'), (10, 10, 10, 255), (255, 255, 255, 255), radius=112)
-render(512, os.path.join(OUT, 'orbitline-mark-black.png'), None, (10, 10, 10, 255))
-render(512, os.path.join(OUT, 'orbitline-mark-white.png'), None, (255, 255, 255, 255))
+render(1024, os.path.join(OUT, 'orbit-icon-1024.png'), (10, 10, 10, 255), (255, 255, 255, 255), radius=224)
+render(512, os.path.join(OUT, 'orbit-icon-512.png'), (10, 10, 10, 255), (255, 255, 255, 255), radius=112)
+render(512, os.path.join(OUT, 'orbit-mark-black.png'), None, (10, 10, 10, 255))
+render(512, os.path.join(OUT, 'orbit-mark-white.png'), None, (255, 255, 255, 255))
 
 def render_logo(path, bg, fg, h=256):
     S = 4
@@ -104,7 +104,7 @@ def render_logo(path, bg, fg, h=256):
         font.set_variation_by_axes([600])
     except Exception:
         pass
-    text = 'Orbitline'
+    text = 'Orbit'
     tw = font.getbbox(text)[2]
     W = int(h * S * 1.0 + tw + h * S * 0.35)
     img = Image.new('RGBA', (W, h * S), bg)
@@ -116,8 +116,8 @@ def render_logo(path, bg, fg, h=256):
     img = img.resize((W // S, h), Image.LANCZOS)
     img.save(path)
 
-render_logo(os.path.join(OUT, 'orbitline-logo-light.png'), (255, 255, 255, 255), (10, 10, 10, 255))
-render_logo(os.path.join(OUT, 'orbitline-logo-dark.png'), (10, 10, 10, 255), (237, 237, 237, 255))
+render_logo(os.path.join(OUT, 'orbit-logo-light.png'), (255, 255, 255, 255), (10, 10, 10, 255))
+render_logo(os.path.join(OUT, 'orbit-logo-dark.png'), (10, 10, 10, 255), (237, 237, 237, 255))
 
 # ---------- Android adaptive icon foreground (108dp viewport, mark inside the 66dp safe zone) ----------
 # Map 64-unit box onto 108 viewport: centre 54, scale so ring outer diameter ~ 50dp.
@@ -131,7 +131,7 @@ s0 = MOON_AT + GAP; s1 = MOON_AT - GAP + 360
 x0, y0 = apt(s0); x1, y1 = apt(s1)
 amx, amy = apt(MOON_AT)
 fg = f'''<?xml version="1.0" encoding="utf-8"?>
-<!-- Orbitline mark: an orbit ring forming an "O", with a moon in its gap. -->
+<!-- Orbit mark: an orbit ring forming an "O", with a moon in its gap. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <title>Orbitline</title>
+  <title>Orbit</title>
   <path d="M50.651,28.375 A19.000,19.000 0 1 1 35.625,13.349" fill="none" stroke="currentColor" stroke-width="6.4" stroke-linecap="round"/>
   <circle cx="45.435" cy="18.565" r="5.2" fill="currentColor"/>
 </svg>

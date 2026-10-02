@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "Orbitline"
+rootProject.name = "Orbit"
 include(":app")

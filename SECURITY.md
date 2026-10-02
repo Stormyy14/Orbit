@@ -6,16 +6,16 @@ Please **don't** open a public issue for security problems. Report them privatel
 GitHub: **Security → Report a vulnerability** on
 https://github.com/Stormyy14/orbitline (private vulnerability reporting).
 
-Include what you found, how to reproduce it, and the Orbitline and Android System WebView
+Include what you found, how to reproduce it, and the Orbit and Android System WebView
 versions. You'll get a reply as soon as possible, and credit in the release notes if you want it.
 
 ## Supported versions
 
 Only the latest release receives security fixes.
 
-## How Orbitline is hardened
+## How Orbit is hardened
 
-Orbitline relies on **Android System WebView** for the web engine, so keep WebView updated from
+Orbit relies on **Android System WebView** for the web engine, so keep WebView updated from
 Google Play. That's where most browser-engine security fixes arrive. On top of WebView:
 
 - **No JavaScript interface.** Pages can't call app code. The only page → app channel is a

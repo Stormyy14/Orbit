@@ -15,7 +15,7 @@
         android:supportsRtl="true"
         android:hardwareAccelerated="true"
         android:networkSecurityConfig="@xml/network_security"
-        android:theme="@style/Theme.Orbitline">
+        android:theme="@style/Theme.Orbit">
         <meta-data
             android:name="android.webkit.WebView.EnableSafeBrowsing"
             android:value="true" />

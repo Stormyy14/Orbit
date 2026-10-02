@@ -2,7 +2,7 @@
 
 _Last updated: 2 October 2026 (0.6.0)_
 
-Orbitline is a web browser. It has **no analytics, no ads, no crash reporting and no servers
+Orbit is a web browser. It has **no analytics, no ads, no crash reporting and no servers
 of its own**. The developer receives no data from the app. Accounts are optional: you can add a
 Google profile (see below) to back up your profile to your own Google Drive.
 
@@ -35,11 +35,11 @@ Settings → Data, or uninstall the app to remove everything.
 | You download a file | The file's server, via Android's Download Manager | The download request. |
 | Safe Browsing check | Google, via Android System WebView | WebView's built-in Safe Browsing uses partial URL hashes to warn about known dangerous sites. |
 
-Orbitline also asks Android System WebView not to send its usage metrics.
+Orbit also asks Android System WebView not to send its usage metrics.
 
 ## Google profiles (optional)
 
-A profile on this device stays on this device. If you add a **Google profile**, Orbitline asks
+A profile on this device stays on this device. If you add a **Google profile**, Orbit asks
 Google for permission to store its own data in your Drive (`drive.appdata`, a hidden folder only
 this app can see) and to read your name and email. It saves one file there, `orbit-profile.json`,
 with that profile's settings, spaces, favorites, hidden elements, shield exceptions and its 500
@@ -47,7 +47,7 @@ most recent history entries. Passwords, cookies, logins and open tabs are never 
 
 The file is sent directly from your phone to Google with a token Android gives the app; the developer
 never sees it. Removing a profile deletes its data from the phone but not the Drive copy; delete that
-from your Google Account → Data & privacy → Third-party apps, or by revoking Orbitline's access.
+from your Google Account → Data & privacy → Third-party apps, or by revoking Orbit's access.
 
 ## Permissions
 
@@ -58,7 +58,7 @@ Website requests for your camera, microphone and location are always refused.
 
 ## Children
 
-Orbitline doesn't collect personal data from anyone, including children.
+Orbit doesn't collect personal data from anyone, including children.
 
 ## Changes
 

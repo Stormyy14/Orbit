@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="branding/orbitline-logo-light.png" alt="Orbitline" height="72">
+  <img src="branding/orbit-logo-light.png" alt="Orbit" height="72">
 </p>
 
 <p align="center">
@@ -10,10 +10,10 @@
 ## Install on your phone (free)
 
 1. On your phone, open the [latest release](https://github.com/Stormyy14/orbitline/releases/latest)
-   and download **`Orbitline-<version>.apk`**.
+   and download **`Orbit-<version>.apk`**.
 2. Open the downloaded file. Android will ask you to allow your browser (or Files app) to
    **install unknown apps**. Allow it for that app only.
-3. Tap **Install**, then open Orbitline. Optionally set it as your default browser in
+3. Tap **Install**, then open Orbit. Optionally set it as your default browser in
    *Settings → Apps → Default apps → Browser app*.
 
 Updates: install a newer APK from Releases over the old one. Your tabs and settings are kept
@@ -24,7 +24,7 @@ Google Play (it's the web engine, and where browser security fixes arrive).
 
 Android shows a "Play Protect" warning for apps that don't come from Google Play. That's
 normal for apps installed directly from GitHub. You can check the APK's signing certificate
-(SHA-256 below) with `apksigner verify --print-certs Orbitline-<version>.apk`.
+(SHA-256 below) with `apksigner verify --print-certs Orbit-<version>.apk`.
 
 ```
 Release signing certificate SHA-256:
@@ -63,7 +63,7 @@ In short: everything stays on the device, nothing is backed up, and the app has 
 
 ## Legal
 
-- **License:** [Apache License 2.0](LICENSE). Copyright 2026 Stormyy14 and Orbitline contributors.
+- **License:** [Apache License 2.0](LICENSE). Copyright 2026 Stormyy14 and Orbit contributors.
   See [NOTICE](NOTICE).
 - **Third-party components:** AndroidX/Jetpack Compose, Material Icons and Kotlin (Apache 2.0),
   plus the Geist fonts (SIL OFL 1.1). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); the
@@ -72,7 +72,7 @@ In short: everything stays on the device, nothing is backed up, and the app has 
   own device, at your request. The blocklist is an original, hand-curated list. Hiding a cookie
   banner never clicks "accept": no consent is given on your behalf.
 - **Trademarks:** website names and icons shown in the app belong to their owners and are only
-  used to identify the sites you visit. Orbitline isn't affiliated with any of them.
+  used to identify the sites you visit. Orbit isn't affiliated with any of them.
 - **No warranty:** the software is provided "as is", as described in the license.
 
 ## The logo
@@ -83,10 +83,10 @@ also works as an Android themed icon. Sources are in [`branding/`](branding) and
 
 | File | Use |
 |---|---|
-| `orbitline-mark.svg` | The mark alone (`currentColor`) |
-| `orbitline-logo.svg` | Mark + wordmark (Geist SemiBold) |
-| `orbitline-icon.svg`, `orbitline-icon-1024.png` | App icon |
-| `orbitline-logo-light.png`, `orbitline-logo-dark.png` | Wordmark renders |
+| `orbit-mark.svg` | The mark alone (`currentColor`) |
+| `orbit-logo.svg` | Mark + wordmark (Geist SemiBold) |
+| `orbit-icon.svg`, `orbit-icon-1024.png` | App icon |
+| `orbit-logo-light.png`, `orbit-logo-dark.png` | Wordmark renders |
 
 ## Build from source
 

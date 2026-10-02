@@ -654,7 +654,7 @@ fun SettingsSheet(onDismiss: () -> Unit) {
                 Icon(painterResource(app.orbitline.R.drawable.orbit_mark), null, tint = Orb.Text, modifier = Modifier.size(28.dp))
                 Spacer(Modifier.width(12.dp))
                 Column {
-                    Text("Orbitline", style = MaterialTheme.typography.titleMedium)
+                    Text("Orbit", style = MaterialTheme.typography.titleMedium)
                     Text("Version $version", style = MaterialTheme.typography.bodySmall, color = Orb.Text2)
                 }
             }
@@ -763,7 +763,7 @@ fun LinkMenu(onDismiss: () -> Unit) {
 private data class Component(val name: String, val owner: String, val license: String, val asset: String)
 
 private val Components = listOf(
-    Component("Orbitline", "Stormyy14 and Orbitline contributors", "Apache License 2.0", "Apache-2.0.txt"),
+    Component("Orbit", "Stormyy14 and Orbit contributors", "Apache License 2.0", "Apache-2.0.txt"),
     Component("Jetpack Compose (UI, Foundation, Material 3, Animation)", "The Android Open Source Project", "Apache License 2.0", "Apache-2.0.txt"),
     Component("AndroidX Activity, Core, Lifecycle, WebKit", "The Android Open Source Project", "Apache License 2.0", "Apache-2.0.txt"),
     Component("Material Icons", "Google LLC", "Apache License 2.0", "Apache-2.0.txt"),
