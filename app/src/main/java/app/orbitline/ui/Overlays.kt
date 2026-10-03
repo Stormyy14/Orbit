@@ -307,7 +307,7 @@ fun PeekOverlay(peek: Tab) {
             ) {
                 Box(Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp).size(32.dp, 4.dp).clip(CircleShape).background(Orb.BorderStrong))
                 Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    SiteIcon(peek.url, 24.dp, peek.favicon)
+                    if (peek.loading) OrbitSpinner(24.dp) else SiteIcon(peek.url, 24.dp, peek.favicon)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(peek.displayTitle, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -316,9 +316,7 @@ fun PeekOverlay(peek: Tab) {
                     IconButton(Icons.AutoMirrored.Outlined.OpenInNew, "Open as tab") { haptics.confirm(); browser.promotePeek() }
                     IconButton(Icons.Outlined.Close, "Close", tint = Orb.Text2) { browser.closePeek() }
                 }
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Orb.Border)) {
-                    if (peek.loading) Box(Modifier.fillMaxWidth(peek.progress / 100f).fillMaxHeight().background(Orb.Text))
-                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Orb.Border))
             }
             WebHost(peek.webView, Modifier.fillMaxSize())
         }
@@ -466,11 +464,8 @@ fun LoadingVeil(tab: Tab) {
             SiteIcon(tab.url, 36.dp, tab.favicon)
             Spacer(Modifier.height(14.dp))
             Text(Url.pretty(tab.url), style = MaterialTheme.typography.bodyMedium, color = Orb.Text2, maxLines = 1)
-            Spacer(Modifier.height(12.dp))
-            Box(Modifier.fillMaxWidth().height(2.dp).clip(CircleShape).background(Orb.Field)) {
-                val p by animateFloatAsState((tab.progress / 100f).coerceIn(0.05f, 1f), tween(200), label = "veil")
-                Box(Modifier.fillMaxWidth(p).fillMaxHeight().background(Orb.Text))
-            }
+            Spacer(Modifier.height(16.dp))
+            OrbitSpinner(28.dp)
         }
     }
 }

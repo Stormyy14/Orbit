@@ -369,7 +369,7 @@ fun ProfilesSheet(onDismiss: () -> Unit) {
             val selected = p.id == browser.profileId
             ListRow(
                 title = p.name,
-                subtitle = profileStatus(p, syncing = selected && browser.syncing, now = browser.now),
+                subtitle = profileStatus(p, syncing = selected && browser.syncing, error = browser.syncError.takeIf { selected }, now = browser.now),
                 leading = { ProfileBadge(p, 28.dp) },
                 trailing = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -390,6 +390,13 @@ fun ProfilesSheet(onDismiss: () -> Unit) {
             ListRow("Sync now", icon = Icons.Outlined.Sync, trailingText = if (browser.syncing) "Syncing" else null) {
                 browser.syncNow(interactive = true)
             }
+            browser.syncError?.takeIf { !browser.syncing }?.let { error ->
+                Text(
+                    "Last sync failed: $error",
+                    style = MaterialTheme.typography.bodySmall, color = Orb.Text,
+                    modifier = Modifier.padding(start = 56.dp, end = 20.dp, bottom = 4.dp),
+                )
+            }
         }
         Text(
             "Each profile has its own spaces, favorites, history, settings and logins. Google profiles save everything except logins and open tabs.",
@@ -399,9 +406,10 @@ fun ProfilesSheet(onDismiss: () -> Unit) {
     }
 }
 
-private fun profileStatus(p: UserProfile, syncing: Boolean, now: Long): String = when {
+private fun profileStatus(p: UserProfile, syncing: Boolean, error: String?, now: Long): String = when {
     !p.google -> "This device only"
     syncing -> "Syncing"
+    error != null -> "Not synced · $error"
     p.syncedAt == 0L -> p.email!!
     else -> "${p.email} · synced ${ago(now - p.syncedAt).let { if (it == "now") "just now" else "$it ago" }}"
 }

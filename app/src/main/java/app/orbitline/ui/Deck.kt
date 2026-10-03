@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
@@ -65,8 +66,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.orbitline.core.Tab
 import app.orbitline.core.Url
-import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlinx.coroutines.launch
 
 /**
  * The Deck: one page per space, ghost tabs at the far end. Cards swipe sideways to close,
@@ -273,7 +274,10 @@ private fun TabCard(tab: Tab, current: Boolean, modifier: Modifier, onOpen: () -
                 }
                 if (tab.ghost) GhostCountdown(tab, Modifier.align(Alignment.BottomEnd).padding(8.dp))
                 if (tab.loading) {
-                    Box(Modifier.align(Alignment.TopStart).fillMaxWidth(tab.progress / 100f).height(2.dp).background(Orb.Text))
+                    Box(
+                        Modifier.align(Alignment.TopStart).padding(8.dp).size(24.dp).clip(CircleShape).background(Orb.Surface),
+                        contentAlignment = Alignment.Center,
+                    ) { OrbitSpinner(18.dp) }
                 }
             }
         }

@@ -16,7 +16,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -342,7 +341,7 @@ fun OrbitBar(
                         .tap(R8) { browser.barCollapsed = false },
                 ) {
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                        LockGlyph(tab, 12)
+                        if (tab?.loading == true) OrbitSpinner(14.dp) else LockGlyph(tab, 12)
                         Spacer(Modifier.width(6.dp))
                         Text(
                             tab?.let { Url.pretty(it.url) } ?: "",
@@ -350,7 +349,6 @@ fun OrbitBar(
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    if (tab?.loading == true) ProgressLine(tab.progress)
                 }
             } else {
                 Box(
@@ -390,7 +388,7 @@ fun OrbitBar(
                                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 )
                             } else {
-                                LockGlyph(tab, 14)
+                                if (tab.loading) OrbitSpinner(18.dp) else LockGlyph(tab, 14)
                                 Spacer(Modifier.width(6.dp))
                                 Text(
                                     Url.pretty(tab.url),
@@ -420,24 +418,10 @@ fun OrbitBar(
                                 .size(18.dp),
                         )
                     }
-                    if (tab != null && tab.loading && !tab.showHome) ProgressLine(tab.progress)
                 }
             }
         }
     }
-}
-
-/** A 2dp determinate progress line hugging the bottom edge of the bar. */
-@Composable
-private fun BoxScope.ProgressLine(progress: Int) {
-    val p by animateFloatAsState((progress / 100f).coerceIn(0.05f, 1f), tween(200), label = "progress")
-    Box(
-        Modifier
-            .align(Alignment.BottomStart)
-            .fillMaxWidth(p)
-            .height(2.dp)
-            .background(Orb.Text),
-    )
 }
 
 @Composable

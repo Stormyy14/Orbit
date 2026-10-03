@@ -46,6 +46,7 @@ import androidx.webkit.ProfileStore
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
@@ -95,6 +96,9 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         private set
     val profile: UserProfile? get() = profiles.firstOrNull { it.id == profileId }
     var syncing by mutableStateOf(false)
+        private set
+    /** Why the active profile's last sync failed, or null if it worked. */
+    var syncError by mutableStateOf<String?>(null)
         private set
     private var pushJob: Job? = null
     /** True while remote data is being applied, so it isn't reported as a local change. */
@@ -521,14 +525,18 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     fun addGoogleProfile() {
         scope.launch {
             val email = sync.pickAccount() ?: return@launch
-            profiles.firstOrNull { it.email.equals(email, ignoreCase = true) }?.let { return@launch switchProfile(it.id) }
+            profiles.firstOrNull { it.email.equals(email, ignoreCase = true) }?.let {
+                if (it.id == profileId) syncNow(interactive = true) else switchProfile(it.id, interactiveSync = true)
+                return@launch
+            }
             try {
                 val token = sync.token(email, interactive = true) ?: return@launch notify("Google access wasn't allowed")
-                val name = sync.displayName(token) ?: email.substringBefore('@')
-                val p = UserProfile(newProfileId(), name, email)
+                val (name, photo) = sync.accountInfo(token)
+                val p = UserProfile(newProfileId(), name ?: email.substringBefore('@'), email, photo)
                 profiles += p
                 saveProfiles()
-                switchProfile(p.id)
+                // The first sync restores a profile saved from another device, and says if anything is wrong.
+                switchProfile(p.id, interactiveSync = true)
             } catch (e: SyncException) {
                 notify(e.message ?: "Couldn't sign in")
             } catch (e: Exception) {
@@ -556,8 +564,11 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         notify("${p.name} removed from this device")
     }
 
-    /** Switches to another profile (null = guest): every tab, space and setting is swapped out. */
-    fun switchProfile(id: String?) {
+    /**
+     * Switches to another profile (null = guest): every tab, space and setting is swapped out.
+     * With [interactiveSync], Google may ask to sign in again and the sync's outcome is shown.
+     */
+    fun switchProfile(id: String?, interactiveSync: Boolean = false) {
         if (id == profileId || (id != null && profiles.none { it.id == id })) return
         if (pushJob?.isActive == true) syncNow()
         saveSession()
@@ -573,11 +584,12 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         settings = Settings(); totalBlocked = 0L; flowMinutesTotal = 0
         currentId = null; currentSpaceId = Space.DEFAULT_ID
         profileId = id
+        syncError = null
         saveProfiles()
         store = storeFor(id)
         loadData()
         notify(profile?.let { "Switched to ${it.name}" } ?: "Browsing as guest")
-        syncNow()
+        syncNow(interactiveSync)
     }
 
     /** Local data that's worth backing up changed; send it to Google a little later. */
@@ -599,20 +611,36 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
      */
     fun syncNow(interactive: Boolean = false) {
         val p = profile?.takeIf { it.google } ?: return
-        if (syncing) return
+        if (syncing) {
+            if (interactive) notify("Already syncing")
+            return
+        }
         pushJob?.cancel()
         // Snapshot now: the user may switch profiles before the network answers.
         val local = syncBundle(p.changedAt)
         syncing = true
         scope.launch {
             var pulled = false
+            fun failed(reason: String) {
+                if (profileId == p.id) syncError = reason
+                if (interactive) notify(reason)
+            }
             try {
-                val token = sync.token(p.email!!, interactive)
+                var token = sync.token(p.email!!, interactive)
                 if (token == null) {
+                    if (profileId == p.id) syncError = "Sign in again to sync"
                     notify("Sign in to sync ${p.name}", "Sign in") { syncNow(interactive = true) }
                     return@launch
                 }
-                val remote = sync.download(token)
+                val remote = try {
+                    sync.download(token)
+                } catch (e: DriveException) {
+                    // A token Google stopped accepting: drop it and ask for a new one, once.
+                    if (e.code != 401) throw e
+                    sync.clearToken(token)
+                    token = sync.token(p.email, interactive) ?: throw e
+                    sync.download(token)
+                }
                 val remoteAt = remote?.optLong("updated") ?: 0L
                 when {
                     remote != null && remoteAt > p.changedAt -> if (profileId == p.id) {
@@ -626,11 +654,15 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
                     }
                     else -> updateProfile(p.id) { it.copy(syncedAt = System.currentTimeMillis()) }
                 }
-                if (interactive) notify("${p.name} is up to date")
+                if (profileId == p.id) syncError = null
+                if (p.photo == null) sync.accountInfo(token).second?.let { photo -> updateProfile(p.id) { it.copy(photo = photo) } }
+                if (interactive) notify(if (pulled) "${p.name} restored from Google" else "${p.name} is up to date")
             } catch (e: SyncException) {
-                if (interactive) notify(e.message ?: "Couldn't sync")
+                failed(e.message ?: "Couldn't sync")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                if (interactive) notify("Couldn't sync")
+                failed(if (e is java.io.IOException) "No connection to Google" else "Couldn't sync")
             } finally {
                 syncing = false
                 // Changed again while uploading: go round once more, later.
@@ -882,6 +914,54 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
 
     fun removeHistory(entry: HistoryEntry) {
         history.remove(entry); saveHistory()
+    }
+
+    /**
+     * Removes a page from "Recently visited": every visit to it in its space, so an older visit
+     * doesn't take its place. Can be undone.
+     */
+    fun removeRecent(entry: HistoryEntry) {
+        val page = entry.url.substringBefore('#')
+        val title = entry.title.takeIf { it.isNotBlank() }
+        val removed = history.filter {
+            it.spaceId == entry.spaceId && (it.url.substringBefore('#') == page || (title != null && it.title == title))
+        }
+        if (removed.isEmpty()) return
+        history.removeAll(removed.toSet())
+        saveHistory()
+        notify("Removed from history", "Undo") { restoreHistory(removed) }
+    }
+
+    private fun restoreHistory(entries: List<HistoryEntry>) {
+        val merged = (history + entries).distinct().sortedByDescending { it.time }
+        history.clear()
+        history.addAll(merged)
+        saveHistory()
+    }
+
+    /** Empties "Recently visited" for a space. History itself is kept (search still finds it). */
+    fun clearRecent(spaceId: String) {
+        val space = spaces.firstOrNull { it.id == spaceId } ?: return
+        updateSpace(space.copy(recentSince = System.currentTimeMillis()))
+        notify("Recently visited cleared", "Undo") {
+            spaces.firstOrNull { it.id == spaceId }?.let { updateSpace(it.copy(recentSince = space.recentSince)) }
+        }
+    }
+
+    /**
+     * Empties the orbit of a space: favorites are unpinned and earlier visits stop counting.
+     * Sites come back as you visit them again. Can be undone.
+     */
+    fun clearOrbit(spaceId: String) {
+        val space = spaces.firstOrNull { it.id == spaceId } ?: return
+        val oldPins = pins.toList()
+        pins.clear()
+        savePins()
+        updateSpace(space.copy(orbitSince = System.currentTimeMillis()))
+        notify("Orbit cleared", "Undo") {
+            pins.clear(); pins.addAll(oldPins); savePins()
+            spaces.firstOrNull { it.id == spaceId }?.let { updateSpace(it.copy(orbitSince = space.orbitSince)) }
+        }
     }
 
     fun forgetSite(host: String) {

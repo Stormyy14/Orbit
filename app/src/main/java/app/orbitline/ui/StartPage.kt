@@ -28,6 +28,7 @@ import kotlin.math.sin
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -42,6 +43,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Timer
@@ -64,6 +67,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.orbitline.core.Browser
 import app.orbitline.core.HistoryEntry
+import app.orbitline.core.Space
 import app.orbitline.core.Tab
 import app.orbitline.core.Url
 import java.text.DateFormat
@@ -87,9 +91,9 @@ fun StartPage(
         return
     }
     val space = browser.currentSpace
-    val favorites = remember(browser.profileId, browser.history.size, browser.pins.size, space.id) { favorites(browser, space.id) }
-    val recent = remember(browser.profileId, browser.history.size, space.id) {
-        browser.history.asSequence().filter { it.spaceId == space.id }
+    val favorites = remember(browser.profileId, browser.history.size, browser.pins.size, space) { favorites(browser, space) }
+    val recent = remember(browser.profileId, browser.history.size, space) {
+        browser.history.asSequence().filter { it.spaceId == space.id && it.time > space.recentSince }
             .distinctBy { it.url.substringBefore('#') }.distinctBy { it.title.ifBlank { it.url } }.take(6).toList()
     }
 
@@ -140,7 +144,7 @@ fun StartPage(
         OrbitView(favorites, space, onSpaces, onAddSites)
 
         if (recent.isNotEmpty()) {
-            Heading("Recently visited", Modifier.padding(top = 8.dp))
+            Heading("Recently visited", Modifier.padding(top = 8.dp), action = "Clear") { browser.clearRecent(space.id) }
             recent.forEach { h -> RecentRow(h, tab, browser) }
         }
     }
@@ -153,7 +157,9 @@ private fun RecentRow(h: HistoryEntry, tab: Tab, browser: Browser) {
         subtitle = Url.pretty(h.url),
         leading = { SiteIcon(h.url, 24.dp) },
         trailingText = ago(browser.now - h.time),
-        onLongClick = { browser.removeHistory(h) },
+        trailing = { IconButton(Icons.Outlined.Close, "Remove from history", tint = Orb.Text3, size = 40.dp) { browser.removeRecent(h) } },
+        contentPadding = PaddingValues(start = 20.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        onLongClick = { browser.removeRecent(h) },
     ) { browser.navigate(h.url, tab) }
 }
 
@@ -176,11 +182,11 @@ private fun SearchField(hint: String, onClick: () -> Unit) {
     }
 }
 
-private fun favorites(browser: Browser, spaceId: String): List<Favorite> {
-    val cutoff = System.currentTimeMillis() - 30L * 86_400_000L
+private fun favorites(browser: Browser, space: Space): List<Favorite> {
+    val cutoff = maxOf(System.currentTimeMillis() - 30L * 86_400_000L, space.orbitSince)
     val counts = HashMap<String, Pair<Int, HistoryEntry>>()
     browser.history.forEach { h ->
-        if (h.spaceId != spaceId || h.time < cutoff) return@forEach
+        if (h.spaceId != space.id || h.time <= cutoff) return@forEach
         val site = Url.host(h.url)?.let(Url::site) ?: return@forEach
         val prev = counts[site]
         counts[site] = (prev?.first ?: 0) + 1 to (prev?.second ?: h)
@@ -219,7 +225,7 @@ private const val TILT = 0.62f
  * to add sites.
  */
 @Composable
-private fun OrbitView(items: List<Favorite>, space: app.orbitline.core.Space, onCenter: () -> Unit, onAdd: () -> Unit) {
+private fun OrbitView(items: List<Favorite>, space: Space, onCenter: () -> Unit, onAdd: () -> Unit) {
     val browser = LocalBrowser.current
     val haptics = rememberHaptics()
     val density = LocalDensity.current
@@ -359,6 +365,9 @@ private fun OrbitView(items: List<Favorite>, space: app.orbitline.core.Space, on
                             DropdownMenuItem(text = { Text("Forget this site", color = Orb.Red) }, onClick = {
                                 Url.host(f.url)?.let(browser::forgetSite); menuFor = null
                             })
+                            DropdownMenuItem(text = { Text("Clear orbit", color = Orb.Red) }, onClick = {
+                                menuFor = null; browser.clearOrbit(space.id)
+                            })
                         }
                     }
                 }
@@ -370,8 +379,13 @@ private fun OrbitView(items: List<Favorite>, space: app.orbitline.core.Space, on
                     Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp),
                     icon = Icons.Outlined.Add,
                 ) { onAdd() }
-            } else if (items.size < ORBIT_CAPACITY) {
-                IconButton(Icons.Outlined.Add, "Add sites", Modifier.align(Alignment.TopEnd), tint = Orb.Text2) { haptics.tick(); onAdd() }
+            } else {
+                IconButton(Icons.Outlined.DeleteSweep, "Clear orbit", Modifier.align(Alignment.TopStart), tint = Orb.Text2) {
+                    haptics.heavy(); browser.clearOrbit(space.id)
+                }
+                if (items.size < ORBIT_CAPACITY) {
+                    IconButton(Icons.Outlined.Add, "Add sites", Modifier.align(Alignment.TopEnd), tint = Orb.Text2) { haptics.tick(); onAdd() }
+                }
             }
         }
     }

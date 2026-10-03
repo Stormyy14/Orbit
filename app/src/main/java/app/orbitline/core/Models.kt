@@ -8,8 +8,13 @@ data class Space(
     val name: String,
     /** Key into the UI's icon set (see ui/SpaceIcons.kt). */
     val icon: String,
+    /** The orbit only counts visits after this (set when the orbit is cleared). */
+    val orbitSince: Long = 0L,
+    /** "Recently visited" only lists visits after this. */
+    val recentSince: Long = 0L,
 ) {
     fun toJson() = JSONObject().put("id", id).put("name", name).put("icon", icon)
+        .put("orbit", orbitSince).put("recent", recentSince)
 
     companion object {
         const val DEFAULT_ID = "personal"
@@ -17,7 +22,10 @@ data class Space(
         fun fromJson(o: JSONObject): Space {
             val id = o.getString("id")
             val name = o.optString("name", "Space")
-            return Space(id, name, o.optString("icon").ifBlank { guessIcon(id, name) })
+            return Space(
+                id, name, o.optString("icon").ifBlank { guessIcon(id, name) },
+                orbitSince = o.optLong("orbit"), recentSince = o.optLong("recent"),
+            )
         }
 
         /** Older versions stored an emoji/colour; pick a sensible icon from the name instead. */

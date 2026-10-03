@@ -4,7 +4,7 @@
 
 Please **don't** open a public issue for security problems. Report them privately through
 GitHub: **Security → Report a vulnerability** on
-https://github.com/Stormyy14/orbitline (private vulnerability reporting).
+https://github.com/Stormyy14/Orbit (private vulnerability reporting).
 
 Include what you found, how to reproduce it, and the Orbit and Android System WebView
 versions. You'll get a reply as soon as possible, and credit in the release notes if you want it.

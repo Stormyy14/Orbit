@@ -28,7 +28,7 @@ Settings → Data, or uninstall the app to remove everything.
 |---|---|---|
 | You visit a website | That website (and anything it loads) | A normal browser request. Third-party trackers on the blocklist and third-party cookies are blocked while Shields is on. |
 | You type in the address bar with "Show search suggestions" on (not in ghost tabs) | Google (`suggestqueries.google.com`) when Google is your search engine, otherwise DuckDuckGo (`ac.duckduckgo.com`) | The text you typed, to get suggestions. No cookies or identifiers are sent. You can turn this off in Settings. |
-| You add or use a Google profile | Google (sign-in and Google Drive API) | Your sign-in, and your profile's data (below), stored in the hidden app-data folder of your own Google Drive. Only this app can read it. |
+| You add or use a Google profile | Google (sign-in, Google Drive API, and `googleusercontent.com` for your account photo) | Your sign-in, and your profile's data (below), stored in the hidden app-data folder of your own Google Drive. Only this app can read it. Your account photo is downloaded to show on the profile. |
 | You search | The search engine you chose in Settings | Your search, as on any browser. |
 | The start page shows a site you haven't visited yet | That site | A request for its icon (`/apple-touch-icon.png` or `/favicon.ico`). |
 | You open Reader view | The page's image hosts | Requests for the article's images. |
@@ -41,7 +41,7 @@ Orbit also asks Android System WebView not to send its usage metrics.
 
 A profile on this device stays on this device. If you add a **Google profile**, Orbit asks
 Google for permission to store its own data in your Drive (`drive.appdata`, a hidden folder only
-this app can see) and to read your name and email. It saves one file there, `orbit-profile.json`,
+this app can see) and to read your name, email and account photo. It saves one file there, `orbit-profile.json`,
 with that profile's settings, spaces, favorites, hidden elements, shield exceptions and its 500
 most recent history entries. Passwords, cookies, logins and open tabs are never uploaded.
 
@@ -66,4 +66,4 @@ Changes to this policy are published in this repository with the date above.
 
 ## Contact
 
-Open an issue at https://github.com/Stormyy14/orbitline/issues.
+Open an issue at https://github.com/Stormyy14/Orbit/issues.

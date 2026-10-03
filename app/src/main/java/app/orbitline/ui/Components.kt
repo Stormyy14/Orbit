@@ -1,5 +1,11 @@
 package app.orbitline.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -43,13 +49,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -58,6 +70,8 @@ import androidx.compose.ui.unit.sp
 import app.orbitline.core.Images
 import app.orbitline.core.Url
 import app.orbitline.core.UserProfile
+import kotlin.math.cos
+import kotlin.math.sin
 
 // ---------------------------------------------------------------------------------------------
 // Haptics — the one place Orbit is "loud": a tick confirms every gesture.
@@ -137,14 +151,46 @@ fun SiteIcon(url: String, size: Dp, favicon: ImageBitmap? = null, shape: Shape =
     }
 }
 
-/** A profile's initial in a circle; the guest gets a plain person. */
+/**
+ * The Orbit mark, spinning: the moon and the gap it sits in travel round the orbit while a page
+ * loads. Same geometry as res/drawable/orbit_mark.xml (24-unit grid).
+ */
+@Composable
+fun OrbitSpinner(size: Dp, modifier: Modifier = Modifier, color: Color = Orb.Text2) {
+    val spin = rememberInfiniteTransition(label = "orbit")
+    val angle by spin.animateFloat(0f, 360f, infiniteRepeatable(tween(1100, easing = LinearEasing)), label = "moon")
+    Canvas(modifier.size(size).semantics { contentDescription = "Loading" }) {
+        val unit = this.size.minDimension / 24f
+        val r = 7.125f * unit
+        val moon = -45f + angle
+        drawArc(
+            color,
+            startAngle = moon + 34f,
+            sweepAngle = 292f,
+            useCenter = false,
+            topLeft = Offset(center.x - r, center.y - r),
+            size = Size(r * 2, r * 2),
+            style = Stroke(2.4f * unit, cap = StrokeCap.Round),
+        )
+        val a = Math.toRadians(moon.toDouble())
+        drawCircle(color, 1.95f * unit, Offset(center.x + r * cos(a).toFloat(), center.y + r * sin(a).toFloat()))
+    }
+}
+
+/** A profile's Google photo, or its initial, in a circle; the guest gets a plain person. */
 @Composable
 fun ProfileBadge(profile: UserProfile?, size: Dp, tint: Color = Orb.Text) {
+    val photoUrl = profile?.photo
+    var photo by remember(photoUrl) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(photoUrl) { if (photoUrl != null) photo = Images.remote(photoUrl, maxWidth = 192) }
     Box(
         Modifier.size(size).clip(CircleShape).border(1.dp, Orb.BorderStrong, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        if (profile == null) {
+        val bm = photo
+        if (bm != null) {
+            Image(bm, profile?.name, Modifier.size(size).clip(CircleShape), contentScale = ContentScale.Crop)
+        } else if (profile == null) {
             Icon(Icons.Outlined.Person, null, tint = tint, modifier = Modifier.size(size * 0.58f))
         } else {
             val letter = profile.name.firstOrNull { it.isLetterOrDigit() }?.uppercaseChar() ?: '·'
@@ -196,10 +242,23 @@ fun SheetTitle(title: String, subtitle: String? = null) {
 
 /** Sentence-case group heading. */
 @Composable
-fun Heading(text: String, modifier: Modifier = Modifier, trailing: String? = null) {
-    Row(modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 6.dp)) {
+fun Heading(text: String, modifier: Modifier = Modifier, trailing: String? = null, action: String? = null, onAction: () -> Unit = {}) {
+    Row(
+        // An action brings its own touch padding, so the heading's text stays where it was.
+        if (action == null) modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 6.dp)
+        else modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(text, style = MaterialTheme.typography.labelMedium, color = Orb.Text2, modifier = Modifier.weight(1f))
         if (trailing != null) Text(trailing, style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = TNUM), color = Orb.Text3)
+        if (action != null) {
+            Text(
+                action,
+                style = MaterialTheme.typography.labelLarge,
+                color = Orb.Text,
+                modifier = Modifier.tap(R8) { onAction() }.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+        }
     }
 }
 
