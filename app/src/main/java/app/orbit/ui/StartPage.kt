@@ -1,5 +1,12 @@
-package app.orbitline.ui
+package app.orbit.ui
 
+import app.orbit.core.Wallpapers
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.foundation.Image
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.foundation.background
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.exponentialDecay
@@ -65,11 +72,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import app.orbitline.core.Browser
-import app.orbitline.core.HistoryEntry
-import app.orbitline.core.Space
-import app.orbitline.core.Tab
-import app.orbitline.core.Url
+import app.orbit.core.Browser
+import app.orbit.core.HistoryEntry
+import app.orbit.core.Space
+import app.orbit.core.Tab
+import app.orbit.core.Url
 import java.text.DateFormat
 import java.util.Date
 
@@ -84,6 +91,7 @@ fun StartPage(
     onShields: () -> Unit,
     onProfiles: () -> Unit,
     onAddSites: () -> Unit,
+    onCustomize: () -> Unit,
 ) {
     val browser = LocalBrowser.current
     if (tab.ghost) {
@@ -97,56 +105,87 @@ fun StartPage(
             .distinctBy { it.url.substringBefore('#') }.distinctBy { it.title.ifBlank { it.url } }.take(6).toList()
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(Orb.Bg)
-            .verticalScroll(rememberScrollState())
-            .statusBarsPadding()
-            .padding(bottom = 120.dp),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 10.dp, end = 16.dp, top = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    val s = browser.settings
+    val context = LocalContext.current
+    val wallpaper by produceState<ImageBitmap?>(null, browser.profileId, s.wallpaper) {
+        value = if (s.wallpaper == 0L) null else Wallpapers.load(context, browser.profileId)
+    }
+
+    Box(Modifier.fillMaxSize().background(Orb.Bg)) {
+        wallpaper?.let { img ->
+            Image(img, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            // Dimmed towards the canvas colour so text and icons stay readable.
+            Box(Modifier.fillMaxSize().background(Orb.Bg.copy(alpha = s.wallpaperDim / 100f)))
+        }
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .statusBarsPadding()
+                .padding(top = if (s.barTop) 68.dp else 0.dp, bottom = if (s.barTop) 32.dp else 120.dp),
         ) {
             Row(
-                Modifier.tap(R8) { onSpaces() }.padding(horizontal = 10.dp, vertical = 8.dp),
+                Modifier.fillMaxWidth().padding(start = 10.dp, end = 16.dp, top = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                SpaceGlyph(space, 20.dp)
-                Spacer(Modifier.width(10.dp))
-                Text(space.name, style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.width(2.dp))
-                Icon(Icons.Outlined.ExpandMore, "Switch space", tint = Orb.Text2, modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.weight(1f))
-            if (browser.flowActive) {
                 Row(
-                    Modifier.tap(R8) { onFlow() }.padding(horizontal = 8.dp, vertical = 6.dp),
+                    Modifier.tap(R8) { onSpaces() }.padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Outlined.Timer, null, tint = Orb.Text2, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        "Focus until " + DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(browser.flowUntil)),
-                        style = MaterialTheme.typography.labelLarge, color = Orb.Text2,
-                    )
+                    SpaceGlyph(space, 20.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text(space.name, style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.width(2.dp))
+                    Icon(Icons.Outlined.ExpandMore, "Switch space", tint = Orb.Text2, modifier = Modifier.size(18.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                if (browser.flowActive) {
+                    Row(
+                        Modifier.tap(R8) { onFlow() }.padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.Timer, null, tint = Orb.Text2, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Focus until " + DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(browser.flowUntil)),
+                            style = MaterialTheme.typography.labelLarge, color = Orb.Text2,
+                        )
+                    }
+                }
+                IconButton(Icons.Outlined.Palette, "Customize", tint = Orb.Text2) { onCustomize() }
+                Box(Modifier.size(44.dp).tap(CircleShape) { onProfiles() }, contentAlignment = Alignment.Center) {
+                    ProfileBadge(browser.profile, 30.dp, tint = Orb.Text2)
                 }
             }
-            Box(Modifier.size(44.dp).tap(CircleShape) { onProfiles() }, contentAlignment = Alignment.Center) {
-                ProfileBadge(browser.profile, 30.dp, tint = Orb.Text2)
+            if (s.showClock) Clock()
+            Spacer(Modifier.height(20.dp))
+            if (s.showSearch) SearchField("Search or type URL", onPulse)
+
+            if (s.showOrbit) {
+                Spacer(Modifier.height(12.dp))
+                OrbitView(favorites, space, onSpaces, onAddSites)
+            }
+
+            if (s.showRecent && recent.isNotEmpty()) {
+                Heading("Recently visited", Modifier.padding(top = 8.dp), action = "Clear") { browser.clearRecent(space.id) }
+                recent.forEach { h -> RecentRow(h, tab, browser) }
             }
         }
-        Spacer(Modifier.height(20.dp))
-        SearchField("Search or type URL", onPulse)
+    }
+}
 
-        Spacer(Modifier.height(12.dp))
-        OrbitView(favorites, space, onSpaces, onAddSites)
-
-        if (recent.isNotEmpty()) {
-            Heading("Recently visited", Modifier.padding(top = 8.dp), action = "Clear") { browser.clearRecent(space.id) }
-            recent.forEach { h -> RecentRow(h, tab, browser) }
-        }
+/** A large clock and the date. Reads the time on its own, so only it redraws every second. */
+@Composable
+private fun Clock() {
+    val browser = LocalBrowser.current
+    val now = Date(browser.now)
+    val datePattern = remember { android.text.format.DateFormat.getBestDateTimePattern(java.util.Locale.getDefault(), "EEEEdMMMM") }
+    Column(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(DateFormat.getTimeInstance(DateFormat.SHORT).format(now), style = MaterialTheme.typography.displayLarge)
+        Text(
+            java.text.SimpleDateFormat(datePattern, java.util.Locale.getDefault()).format(now),
+            style = MaterialTheme.typography.bodyMedium, color = Orb.Text2,
+        )
     }
 }
 
@@ -333,7 +372,7 @@ private fun OrbitView(items: List<Favorite>, space: Space, onCenter: () -> Unit,
                                     .size(nodeDp)
                                     .clip(CircleShape)
                                     .background(Orb.Field)
-                                    .border(if (f.pinned) 1.5.dp else 0.dp, if (f.pinned) Orb.Text else Color.Transparent, CircleShape)
+                                    .border(if (f.pinned) 1.5.dp else 0.dp, if (f.pinned) Orb.Contrast else Color.Transparent, CircleShape)
                                     .tap(CircleShape, onLongClick = { haptics.heavy(); menuFor = f }) { haptics.tick(); browser.navigate(f.url) },
                                 contentAlignment = Alignment.Center,
                             ) { SiteIcon(f.url, nodeDp * 0.5f, shape = RoundedCornerShape(4.dp), framed = false) }

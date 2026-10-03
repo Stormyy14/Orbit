@@ -2,7 +2,7 @@
 import math, os
 from PIL import Image, ImageDraw, ImageFont
 
-ROOT = r'C:\orbitline'
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, 'branding')
 os.makedirs(OUT, exist_ok=True)
 

@@ -1,4 +1,4 @@
-package app.orbitline.core
+package app.orbit.core
 
 import org.json.JSONArray
 import org.json.JSONObject
@@ -85,6 +85,29 @@ enum class SearchEngine(val label: String, val template: String, val suggest: Bo
     BING("Bing", "https://www.bing.com/search?q=%s"),
 }
 
+// ---- Customization: how Orbit looks and behaves. Part of each profile's settings. ----
+
+enum class ThemeMode(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK("Dark"), BLACK("Black") }
+
+/** The colour of primary buttons, switches and selections. [MONO] uses the text colour. */
+enum class Accent(val label: String, val light: Long, val dark: Long) {
+    MONO("Mono", 0xFF171717, 0xFFEDEDED),
+    BLUE("Blue", 0xFF0A6CFF, 0xFF5AA2FF),
+    VIOLET("Violet", 0xFF7C3AED, 0xFFA78BFA),
+    PINK("Pink", 0xFFDB2777, 0xFFF472B6),
+    ORANGE("Orange", 0xFFEA580C, 0xFFFB923C),
+    YELLOW("Yellow", 0xFFB45309, 0xFFFACC15),
+    GREEN("Green", 0xFF15803D, 0xFF4ADE80),
+    TEAL("Teal", 0xFF0F766E, 0xFF2DD4BF),
+}
+
+/** Corner radius of buttons, fields and cards (small, large), in dp. */
+enum class Corners(val label: String, val small: Int, val large: Int) {
+    SQUARE("Square", 2, 4), SOFT("Soft", 8, 12), ROUND("Round", 16, 22),
+}
+
+enum class FontChoice(val label: String) { GEIST("Geist"), SYSTEM("System"), SERIF("Serif"), MONO("Mono") }
+
 data class Settings(
     val engine: SearchEngine = SearchEngine.GOOGLE,
     val suggestions: Boolean = true,
@@ -99,7 +122,41 @@ data class Settings(
         "youtube.com", "tiktok.com", "instagram.com", "x.com", "twitter.com",
         "reddit.com", "facebook.com", "netflix.com", "twitch.tv",
     ),
+    /** Keep video and music playing with Orbit in the background, with media controls. */
+    val backgroundPlay: Boolean = true,
+    // Look
+    val theme: ThemeMode = ThemeMode.SYSTEM,
+    val accent: Accent = Accent.MONO,
+    val corners: Corners = Corners.SOFT,
+    val font: FontChoice = FontChoice.GEIST,
+    /** Scale for all app text (not web pages). */
+    val textScale: Float = 1f,
+    /** Web page text zoom, in percent. */
+    val pageZoom: Int = 100,
+    // Address bar
+    val barTop: Boolean = false,
+    val fullAddress: Boolean = false,
+    // Start page
+    val showClock: Boolean = false,
+    val showSearch: Boolean = true,
+    val showOrbit: Boolean = true,
+    val showRecent: Boolean = true,
+    /** When the start page wallpaper was set (0 = none). The image itself stays on this device. */
+    val wallpaper: Long = 0L,
+    /** How much the wallpaper is dimmed under the start page, in percent. */
+    val wallpaperDim: Int = 50,
 ) {
+    /** The same settings with every customization back to its default. */
+    fun withDefaultLook(): Settings {
+        val d = Settings()
+        return copy(
+            theme = d.theme, accent = d.accent, corners = d.corners, font = d.font, textScale = d.textScale,
+            pageZoom = d.pageZoom, barTop = d.barTop, fullAddress = d.fullAddress, showClock = d.showClock,
+            showSearch = d.showSearch, showOrbit = d.showOrbit, showRecent = d.showRecent, wallpaperDim = d.wallpaperDim,
+            darkPages = d.darkPages, collapseOnScroll = d.collapseOnScroll,
+        )
+    }
+
     fun toJson(): JSONObject = JSONObject()
         .put("v", VERSION)
         .put("engine", engine.name)
@@ -112,6 +169,21 @@ data class Settings(
         .put("desktop", desktopDefault)
         .put("collapse", collapseOnScroll)
         .put("flow", JSONArray(flowDomains))
+        .put("bgPlay", backgroundPlay)
+        .put("theme", theme.name)
+        .put("accent", accent.name)
+        .put("corners", corners.name)
+        .put("font", font.name)
+        .put("textScale", textScale.toDouble())
+        .put("pageZoom", pageZoom)
+        .put("barTop", barTop)
+        .put("fullAddress", fullAddress)
+        .put("clock", showClock)
+        .put("search", showSearch)
+        .put("orbit", showOrbit)
+        .put("recent", showRecent)
+        .put("wallpaper", wallpaper)
+        .put("wallpaperDim", wallpaperDim)
 
     companion object {
         /** 2: Google became the default engine; older files get it once. */
@@ -132,8 +204,26 @@ data class Settings(
                 desktopDefault = o.optBoolean("desktop", d.desktopDefault),
                 collapseOnScroll = o.optBoolean("collapse", d.collapseOnScroll),
                 flowDomains = o.optJSONArray("flow")?.let { a -> List(a.length()) { a.getString(it) } } ?: d.flowDomains,
+                backgroundPlay = o.optBoolean("bgPlay", d.backgroundPlay),
+                theme = enumOr(o.optString("theme"), d.theme),
+                accent = enumOr(o.optString("accent"), d.accent),
+                corners = enumOr(o.optString("corners"), d.corners),
+                font = enumOr(o.optString("font"), d.font),
+                textScale = o.optDouble("textScale", d.textScale.toDouble()).toFloat().coerceIn(0.8f, 1.5f),
+                pageZoom = o.optInt("pageZoom", d.pageZoom).coerceIn(50, 200),
+                barTop = o.optBoolean("barTop", d.barTop),
+                fullAddress = o.optBoolean("fullAddress", d.fullAddress),
+                showClock = o.optBoolean("clock", d.showClock),
+                showSearch = o.optBoolean("search", d.showSearch),
+                showOrbit = o.optBoolean("orbit", d.showOrbit),
+                showRecent = o.optBoolean("recent", d.showRecent),
+                wallpaper = o.optLong("wallpaper", d.wallpaper),
+                wallpaperDim = o.optInt("wallpaperDim", d.wallpaperDim).coerceIn(0, 90),
             )
         }
+
+        private inline fun <reified T : Enum<T>> enumOr(name: String, fallback: T): T =
+            enumValues<T>().firstOrNull { it.name == name } ?: fallback
     }
 }
 

@@ -1,4 +1,4 @@
-package app.orbitline.core
+package app.orbit.core
 
 import android.annotation.SuppressLint
 import android.app.DownloadManager
@@ -40,7 +40,9 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.Profile
 import androidx.webkit.ProfileStore
 import androidx.webkit.WebSettingsCompat
@@ -152,6 +154,21 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     private var customCallback: WebChromeClient.CustomViewCallback? = null
 
     var foreground = true
+
+    // ---- media: what's playing, for the notification and background playback ----
+    /** The tab whose media the notification controls, and whether it's playing right now. */
+    var mediaTabId by mutableStateOf<String?>(null)
+        private set
+    var mediaPlaying by mutableStateOf(false)
+        private set
+    /** The frame that reported the media; commands go back to it (it may be an embedded player). */
+    private var mediaReply: JavaScriptReplyProxy? = null
+    private var mediaArtUrl: String? = null
+    private var mediaArt: Bitmap? = null
+    private var lastMedia: JSONObject? = null
+
+    /** Set by the activity: asks once for permission to show the media notification. */
+    var askNotifications: (() -> Unit)? = null
     /** Set by the activity: launches a file picker and reports the chosen URIs. */
     var fileChooser: ((Intent, (Array<Uri>?) -> Unit) -> Unit)? = null
 
@@ -169,6 +186,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
 
     fun load() {
         Images.init(activity)
+        MediaCenter.onCommand = ::mediaCommand
         root.readObject("profiles")?.let { o ->
             o.optJSONArray("list")?.let { a -> for (i in 0 until a.length()) profiles += UserProfile.fromJson(a.getJSONObject(i)) }
             profileId = o.optString("active").takeIf { id -> profiles.any { it.id == id } }
@@ -286,9 +304,24 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         changed()
     }
 
+    /** Uses a picked image as this profile's start page wallpaper. */
+    fun setWallpaper(uri: Uri) {
+        val id = profileId
+        scope.launch {
+            if (Wallpapers.save(activity, uri, id) && id == profileId) {
+                updateSettings(settings.copy(wallpaper = System.currentTimeMillis()))
+            } else if (id == profileId) notify("Couldn't use that image")
+        }
+    }
+
+    fun removeWallpaper() {
+        Wallpapers.delete(activity, profileId)
+        updateSettings(settings.copy(wallpaper = 0L))
+    }
+
     fun onPause() {
         foreground = false
-        current?.webView?.onPause()
+        current?.let { if (!keepsPlaying(it)) it.webView?.onPause() }
         saveSession()
         // Don't leave changes waiting for the debounce: the app may not come back.
         if (pushJob?.isActive == true) syncNow()
@@ -339,7 +372,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
             if (!tab.showHome) ensureWebView(tab)
             return
         }
-        prev?.let { captureThumbnail(it); it.webView?.onPause() }
+        prev?.let { captureThumbnail(it); if (!keepsPlaying(it)) it.webView?.onPause() }
         currentId = tab.id
         if (!tab.ghost) currentSpaceId = tab.spaceId
         tab.lastActive = System.currentTimeMillis()
@@ -556,6 +589,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
             ?: Space.Defaults.map { it.id }
         s.wipe()
         stores.remove(id)
+        Wallpapers.delete(activity, id)
         profiles.remove(p)
         saveProfiles()
         if (multiProfile) main.postDelayed({
@@ -686,7 +720,8 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     private fun applySyncBundle(o: JSONObject) {
         applyingRemote = true
         try {
-            o.optJSONObject("settings")?.let { updateSettings(Settings.fromJson(it)) }
+            // The wallpaper image stays on each device, so keep this device's choice.
+            o.optJSONObject("settings")?.let { updateSettings(Settings.fromJson(it).copy(wallpaper = settings.wallpaper)) }
             o.optJSONArray("spaces")?.let { a ->
                 val remote = List(a.length()) { Space.fromJson(a.getJSONObject(it)) }
                 if (remote.isEmpty()) return@let
@@ -1011,6 +1046,10 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
 
     fun handleIntent(intent: Intent?) {
         intent ?: return
+        if (intent.action == MediaCenter.ACTION_OPEN) {
+            intent.getStringExtra(MediaCenter.EXTRA_TAB)?.let { id -> tabs.firstOrNull { it.id == id }?.let(::select) }
+            return
+        }
         if (intent.action in setOf(Intent.ACTION_VIEW, Intent.ACTION_WEB_SEARCH, Intent.ACTION_SEND)) externalOpens++
         when (intent.action) {
             Intent.ACTION_VIEW -> intent.dataString?.let { openFromOutside(it) }
@@ -1083,7 +1122,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
 
     /** Keeps memory in check: tabs not used recently are serialized and their WebView freed. */
     private fun hibernateIdle(maxLive: Int = 6) {
-        val live = liveTabs().filter { it.id != currentId }.sortedBy { it.lastActive }
+        val live = liveTabs().filter { it.id != currentId && it.id != mediaTabId }.sortedBy { it.lastActive }
         val excess = live.size - (maxLive - 1)
         if (excess <= 0) return
         live.take(excess).forEach { t ->
@@ -1096,6 +1135,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     }
 
     private fun destroyWebView(tab: Tab) {
+        if (tab.id == mediaTabId) stopMedia()
         val wv = tab.webView ?: return
         tab.webView = null
         (wv.parent as? ViewGroup)?.removeView(wv)
@@ -1122,6 +1162,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
             userAgentString = if (tab.desktop || settings.desktopDefault) desktopUa else mobileUa
             useWideViewPort = true
             loadWithOverviewMode = true
+            textZoom = settings.pageZoom
         }
         if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
             WebSettingsCompat.setAlgorithmicDarkeningAllowed(wv.settings, settings.darkPages)
@@ -1210,8 +1251,106 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         }
     }
 
+    /**
+     * Media reports from pages (see [Scripts.MEDIA]). Any frame may report, since players are
+     * often embedded; the data is only shown in the notification, and commands go back only to
+     * the frame that reported.
+     */
+    private fun installMediaBridge(wv: WebView, tab: Tab) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return
+        runCatching {
+            WebViewCompat.addWebMessageListener(wv, "OrbitMedia", setOf("*")) { _, message, _, _, reply ->
+                val data = message.data ?: return@addWebMessageListener
+                if (data.length < 8000) onMediaMessage(tab, data, reply)
+            }
+            if (docStartScripts) WebViewCompat.addDocumentStartJavaScript(wv, Scripts.MEDIA, setOf("*"))
+        }
+    }
+
+    /** True if this tab should keep running while Orbit is in the background. */
+    fun keepsPlaying(tab: Tab) = settings.backgroundPlay && mediaPlaying && tab.id == mediaTabId
+
+    private fun onMediaMessage(tab: Tab, raw: String, reply: JavaScriptReplyProxy) {
+        if (!settings.backgroundPlay) return
+        val o = runCatching { JSONObject(raw) }.getOrNull() ?: return
+        // The player went away (e.g. the site navigated to another page without reloading).
+        if (o.optBoolean("gone")) {
+            if (tab.id == mediaTabId) stopMedia()
+            return
+        }
+        val playing = o.optBoolean("playing")
+        // A paused report only matters for the tab the notification is about.
+        if (!playing && tab.id != mediaTabId) return
+        if (playing && mediaTabId == null) askNotifications?.invoke()
+        mediaTabId = tab.id
+        mediaReply = reply
+        mediaPlaying = playing
+        lastMedia = o
+        val art = o.optString("art").takeIf { it.startsWith("https://") && it.length < 2000 && !tab.ghost }
+        if (art != mediaArtUrl) {
+            mediaArtUrl = art
+            mediaArt = null
+            if (art != null) scope.launch {
+                val bmp = runCatching { Images.remote(art, maxWidth = 512)?.asAndroidBitmap() }.getOrNull()
+                if (mediaArtUrl == art && bmp != null) { mediaArt = bmp; publishMedia() }
+            }
+        }
+        publishMedia()
+    }
+
+    private fun publishMedia() {
+        val id = mediaTabId ?: return
+        val tab = tabs.firstOrNull { it.id == id } ?: return stopMedia()
+        val o = lastMedia ?: return
+        val site = tab.pageHost?.let(Url::site).orEmpty()
+        val info = if (tab.ghost) {
+            MediaInfo(id, "Ghost tab", "Playing privately", mediaPlaying, 0, 0, false, false, null, private = true)
+        } else {
+            MediaInfo(
+                tabId = id,
+                title = o.optString("title").trim().take(200).ifBlank { tab.displayTitle },
+                artist = o.optString("artist").trim().take(200).ifBlank { site },
+                playing = mediaPlaying,
+                positionMs = o.optLong("pos").coerceAtLeast(0),
+                durationMs = o.optLong("dur").coerceAtLeast(0),
+                hasNext = o.optBoolean("next"),
+                hasPrev = o.optBoolean("prev"),
+                art = mediaArt ?: tab.favicon?.asAndroidBitmap(),
+                private = false,
+            )
+        }
+        MediaCenter.publish(activity, info)
+    }
+
+    /** Commands from the notification, lock screen or headset. */
+    private fun mediaCommand(cmd: String) {
+        val reply = mediaReply
+        if (cmd == "stop") {
+            runCatching { reply?.postMessage("pause") }
+            stopMedia()
+            return
+        }
+        if (reply == null) return stopMedia()
+        runCatching { reply.postMessage(cmd) }.onFailure { stopMedia() }
+        // While Orbit is in the background a paused tab's WebView may be paused too; wake it to play.
+        if (cmd == "play") tabs.firstOrNull { it.id == mediaTabId }?.webView?.onResume()
+    }
+
+    fun stopMedia() {
+        val id = mediaTabId
+        mediaTabId = null
+        mediaPlaying = false
+        mediaReply = null
+        mediaArtUrl = null
+        mediaArt = null
+        lastMedia = null
+        MediaCenter.clear(activity)
+        // Back in the background with nothing playing: let the tab rest like any other.
+        if (!foreground) tabs.firstOrNull { it.id == id }?.webView?.onPause()
+    }
+
     private fun createWebView(tab: Tab): WebView {
-        val wv = WebView(activity)
+        val wv = OrbitWebView(activity) { keepsPlaying(tab) }
         if (multiProfile) runCatching { WebViewCompat.setProfile(wv, profileName(tab.spaceId, tab.ghost)) }
         wv.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         wv.settings.apply {
@@ -1230,6 +1369,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         }
         applyWebSettings(wv, tab)
         installBridge(wv, tab)
+        installMediaBridge(wv, tab)
         if (docStartScripts && settings.hideCookieBanners) {
             runCatching { WebViewCompat.addDocumentStartJavaScript(wv, Scripts.style("orbit-cookie", Shields.cookieCss), setOf("*")) }
         }
@@ -1327,6 +1467,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
                 tab.canBack = view.canGoBack()
                 tab.canForward = view.canGoForward()
                 injectPageStyles(tab)
+                if (!docStartScripts) view.evaluateJavascript(Scripts.MEDIA, null)
                 readThemeColor(tab)
                 recordVisit(tab, url, view.title ?: "")
                 if (tab.id == currentId) main.postDelayed({ captureThumbnail(tab) }, 600)
@@ -1437,5 +1578,16 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
             val hex = if (Regex("^#[0-9a-f]{3}$").matches(s)) "#" + s.drop(1).map { "$it$it" }.joinToString("") else s
             return runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrNull()
         }
+    }
+}
+
+/**
+ * A WebView that can keep playing in the background: while [keepAlive] is true it isn't told its
+ * window went away, so the engine doesn't pause or throttle the page's media.
+ */
+@SuppressLint("ViewConstructor")
+private class OrbitWebView(context: Context, private val keepAlive: () -> Boolean) : WebView(context) {
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(if (visibility != View.VISIBLE && keepAlive()) View.VISIBLE else visibility)
     }
 }

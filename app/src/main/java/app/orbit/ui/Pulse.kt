@@ -1,4 +1,4 @@
-package app.orbitline.ui
+package app.orbit.ui
 
 import android.app.Activity
 import android.content.Intent
@@ -73,10 +73,10 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
-import app.orbitline.core.HistoryEntry
-import app.orbitline.core.Space
-import app.orbitline.core.Tab
-import app.orbitline.core.Url
+import app.orbit.core.HistoryEntry
+import app.orbit.core.Space
+import app.orbit.core.Tab
+import app.orbit.core.Url
 import kotlinx.coroutines.delay
 
 data class Command(

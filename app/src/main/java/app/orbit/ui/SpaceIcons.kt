@@ -1,4 +1,4 @@
-package app.orbitline.ui
+package app.orbit.ui
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
@@ -27,7 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import app.orbitline.core.Space
+import app.orbit.core.Space
 
 /** Icons a space can wear. Keys are persisted, so only ever append. */
 val SpaceIconSet: List<Pair<String, ImageVector>> = listOf(

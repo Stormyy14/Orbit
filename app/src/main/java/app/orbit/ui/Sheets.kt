@@ -1,5 +1,7 @@
-package app.orbitline.ui
+package app.orbit.ui
 
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.Palette
 import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -34,7 +36,6 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Cookie
-import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.DesktopWindows
@@ -54,7 +55,6 @@ import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Timer
-import androidx.compose.material.icons.outlined.VerticalAlignBottom
 import androidx.compose.material.icons.outlined.Vibration
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -79,16 +79,16 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.webkit.WebViewCompat
-import app.orbitline.core.SearchEngine
-import app.orbitline.core.Settings
-import app.orbitline.core.Space
-import app.orbitline.core.Tab
-import app.orbitline.core.Url
-import app.orbitline.core.UserProfile
+import app.orbit.core.SearchEngine
+import app.orbit.core.Settings
+import app.orbit.core.Space
+import app.orbit.core.Tab
+import app.orbit.core.Url
+import app.orbit.core.UserProfile
 import java.text.DateFormat
 import java.util.Date
 
-enum class SheetKind { Menu, Shields, Spaces, Flow, Settings, Trail, Profiles, QuickAdd }
+enum class SheetKind { Menu, Shields, Spaces, Flow, Settings, Trail, Profiles, QuickAdd, Customize }
 
 private val Flat = RoundedCornerShape(0.dp)
 
@@ -138,6 +138,7 @@ fun PageMenu(tab: Tab?, open: (SheetKind) -> Unit, onDismiss: () -> Unit) {
             ) { act { open(SheetKind.Flow) } }
             MenuRow(spaceIcon(browser.currentSpace.icon), "Spaces", meta = browser.currentSpace.name) { act { open(SheetKind.Spaces) } }
             MenuRow(Icons.Outlined.AccountCircle, "Profiles", meta = browser.profile?.name ?: "Guest") { act { open(SheetKind.Profiles) } }
+            MenuRow(Icons.Outlined.Palette, "Customize") { act { open(SheetKind.Customize) } }
             MenuRow(Icons.Outlined.Settings, "Settings") { act { open(SheetKind.Settings) } }
             if (tab != null) {
                 Hairline()
@@ -609,7 +610,7 @@ fun FlowSheet(onDismiss: () -> Unit) {
 // =============================================================================================
 
 @Composable
-fun SettingsSheet(onDismiss: () -> Unit) {
+fun SettingsSheet(onCustomize: () -> Unit, onDismiss: () -> Unit) {
     val browser = LocalBrowser.current
     val context = LocalContext.current
     val s = browser.settings
@@ -623,6 +624,7 @@ fun SettingsSheet(onDismiss: () -> Unit) {
         }
         Column(Modifier.heightIn(max = 680.dp).verticalScroll(rememberScrollState())) {
             Text("Settings", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 20.dp, top = 4.dp, bottom = 4.dp))
+            ListRow("Customize", subtitle = "Theme, colours, font, start page, address bar, app icon", icon = Icons.Outlined.Palette) { onCustomize() }
             Heading("Search engine")
             SearchEngine.entries.forEach { e ->
                 ListRow(
@@ -646,9 +648,14 @@ fun SettingsSheet(onDismiss: () -> Unit) {
             )
             Segmented(listOf(5, 15, 30, 60), s.ghostMinutes, Modifier.padding(horizontal = 16.dp), label = { "$it min" }) { set(s.copy(ghostMinutes = it)) }
             Heading("Browsing")
-            ToggleRow("Dark websites", "Only in dark mode", s.darkPages, Icons.Outlined.DarkMode) { set(s.copy(darkPages = it)) }
+            ToggleRow(
+                "Keep playing in the background", "Video and music continue with Orbit minimized, with controls in notifications",
+                s.backgroundPlay, Icons.Outlined.PlayCircle,
+            ) {
+                set(s.copy(backgroundPlay = it))
+                if (!it) browser.stopMedia()
+            }
             ToggleRow("Desktop sites", null, s.desktopDefault, Icons.Outlined.DesktopWindows) { set(s.copy(desktopDefault = it)) }
-            ToggleRow("Shrink address bar on scroll", null, s.collapseOnScroll, Icons.Outlined.VerticalAlignBottom) { set(s.copy(collapseOnScroll = it)) }
             ToggleRow("Vibration", null, s.haptics, Icons.Outlined.Vibration) { set(s.copy(haptics = it)) }
             Heading("Data")
             ListRow("Reopen closed tab", icon = Icons.Outlined.Restore) { onDismiss(); browser.reopenClosed() }
@@ -659,7 +666,7 @@ fun SettingsSheet(onDismiss: () -> Unit) {
             val wv = remember { runCatching { WebViewCompat.getCurrentWebViewPackage(context)?.versionName }.getOrNull() ?: "unknown" }
             val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "" }
             Row(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(painterResource(app.orbitline.R.drawable.orbit_mark), null, tint = Orb.Text, modifier = Modifier.size(28.dp))
+                Icon(painterResource(app.orbit.R.drawable.orbit_mark), null, tint = Orb.Text, modifier = Modifier.size(28.dp))
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text("Orbit", style = MaterialTheme.typography.titleMedium)

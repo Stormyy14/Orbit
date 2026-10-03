@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "app.orbitline"
+    namespace = "app.orbit"
     compileSdk = 36
 
     defaultConfig {
@@ -18,14 +18,14 @@ android {
 
     // Release signing comes from ~/.gradle/gradle.properties (never from the repo).
     // Without those properties, release builds fall back to the debug key so anyone can build.
-    val storeFilePath = providers.gradleProperty("ORBITLINE_STORE_FILE").orNull
+    val storeFilePath = providers.gradleProperty("ORBIT_STORE_FILE").orNull
     signingConfigs {
         if (storeFilePath != null) {
             create("release") {
                 storeFile = file(storeFilePath)
-                storePassword = providers.gradleProperty("ORBITLINE_STORE_PASSWORD").get()
-                keyAlias = providers.gradleProperty("ORBITLINE_KEY_ALIAS").get()
-                keyPassword = providers.gradleProperty("ORBITLINE_KEY_PASSWORD").get()
+                storePassword = providers.gradleProperty("ORBIT_STORE_PASSWORD").get()
+                keyAlias = providers.gradleProperty("ORBIT_KEY_ALIAS").get()
+                keyPassword = providers.gradleProperty("ORBIT_KEY_PASSWORD").get()
             }
         }
     }

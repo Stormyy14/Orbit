@@ -1,4 +1,4 @@
-package app.orbitline.core
+package app.orbit.core
 
 import android.os.Bundle
 import android.webkit.WebView

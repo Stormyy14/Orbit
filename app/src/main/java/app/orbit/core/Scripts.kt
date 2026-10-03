@@ -1,4 +1,4 @@
-package app.orbitline.core
+package app.orbit.core
 
 import org.json.JSONArray
 import org.json.JSONObject
@@ -87,6 +87,48 @@ window.__orbitZapOff=function(){document.removeEventListener('touchstart',pick,t
 })();"""
 
     const val ZAP_OFF = "(function(){if(window.__orbitZapOff)window.__orbitZapOff();})();"
+
+    /**
+     * Media: tells the app (via OrbitMedia) what is playing, so it can show media controls, and
+     * takes play/pause/next/previous/seek commands back. While something audible is playing the
+     * page is told it's still visible, so sites like YouTube don't pause when Orbit goes to the
+     * background. Muted previews and short sounds are ignored.
+     */
+    const val MEDIA = """
+(function(){var B=window.OrbitMedia;if(!B||window.__orbitMedia)return;window.__orbitMedia=1;
+var cur=null,last=0,H={},seen=window.WeakSet?new WeakSet():null;
+function audible(el){return el&&!el.paused&&!el.ended&&!el.muted&&el.volume>0&&!(isFinite(el.duration)&&el.duration<5);}
+function playing(){return audible(cur);}
+try{['hidden','webkitHidden','visibilityState','webkitVisibilityState'].forEach(function(k){
+var d=Object.getOwnPropertyDescriptor(Document.prototype,k);if(!d||!d.get)return;
+Object.defineProperty(Document.prototype,k,{configurable:true,enumerable:d.enumerable,get:function(){
+if(playing())return k.indexOf('isibility')>0?'visible':false;return d.get.call(this);}});});}catch(e){}
+['visibilitychange','webkitvisibilitychange'].forEach(function(t){window.addEventListener(t,function(e){if(playing())e.stopImmediatePropagation();},true);});
+try{var ms=navigator.mediaSession;if(ms&&ms.setActionHandler){var sa=ms.setActionHandler.bind(ms);
+ms.setActionHandler=function(a,h){H[a]=h;try{return sa(a,h);}catch(x){}};}}catch(e){}
+function meta(){var m=null,art='';try{m=navigator.mediaSession&&navigator.mediaSession.metadata;}catch(e){}
+try{if(m&&m.artwork&&m.artwork.length){var b=m.artwork[m.artwork.length-1];art=(b&&b.src)||'';}}catch(e){}
+return{title:(m&&m.title)||document.title||'',artist:(m&&m.artist)||'',art:art};}
+function send(force){var el=cur;if(!el)return;var now=Date.now();if(!force&&now-last<5000)return;last=now;
+var d=meta();d.playing=playing();d.pos=Math.floor((el.currentTime||0)*1000);d.dur=isFinite(el.duration)?Math.floor(el.duration*1000):0;
+d.next=!!H.nexttrack;d.prev=!!H.previoustrack;d.video=el.tagName==='VIDEO';
+try{B.postMessage(JSON.stringify(d));}catch(e){}}
+function ev(e){var el=e.target;
+if(e.type==='emptied'&&el===cur&&!el.currentSrc){cur=null;try{B.postMessage('{"gone":true}');}catch(x){}return;}
+if(el!==cur){if(!audible(el))return;cur=el;}
+send(e.type!=='timeupdate');}
+function track(el){if(!el||!(el instanceof HTMLMediaElement))return;if(seen){if(seen.has(el))return;seen.add(el);}else if(el.__orbitT)return;else el.__orbitT=1;
+['play','playing','pause','ended','seeked','ratechange','durationchange','loadedmetadata','timeupdate','volumechange','emptied'].forEach(function(t){el.addEventListener(t,ev);});}
+document.addEventListener('play',function(e){track(e.target);},true);
+try{var P=HTMLMediaElement.prototype,op=P.play;P.play=function(){track(this);return op.apply(this,arguments);};}catch(e){}
+B.onmessage=function(m){var c=String(m.data||''),el=cur;try{
+if(c==='play'){if(el)el.play();else if(H.play)H.play({action:'play'});}
+else if(c==='pause'){if(el)el.pause();else if(H.pause)H.pause({action:'pause'});}
+else if(c==='next'){if(H.nexttrack)H.nexttrack({action:'nexttrack'});}
+else if(c==='prev'){if(H.previoustrack)H.previoustrack({action:'previoustrack'});else if(el)el.currentTime=0;}
+else if(c.indexOf('seek:')===0&&el){el.currentTime=parseFloat(c.slice(5))/1000;}
+}catch(e){}};
+})();"""
 
     /** evaluateJavascript returns a JSON-encoded value; unwrap a string result. */
     fun unwrap(result: String?): String {

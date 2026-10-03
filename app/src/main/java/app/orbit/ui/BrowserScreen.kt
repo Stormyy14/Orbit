@@ -1,5 +1,9 @@
-package app.orbitline.ui
+package app.orbit.ui
 
+import androidx.compose.runtime.key
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.outlined.Palette
 import android.app.Activity
 import android.view.View
 import androidx.activity.compose.BackHandler
@@ -69,7 +73,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import app.orbitline.core.Browser
+import app.orbit.core.Browser
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -85,6 +89,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
         with(density) { RadialState(radiusPx = 120.dp.toPx(), marginPx = 30.dp.toPx(), deadPx = 36.dp.toPx(), liftPx = 26.dp.toPx()) }
     }
     val page = tab != null && !tab.showHome
+    val barTop = browser.settings.barTop
     LaunchedEffect(browser.externalOpens) {
         if (browser.externalOpens > 0) { pulse = false; deck = false; sheet = null; browser.linkMenu = null; browser.reader = null }
     }
@@ -134,6 +139,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
             })
             add(Command("Reload", "Refresh this page", Icons.Outlined.Refresh, "refresh") { browser.reload() })
             add(Command("Close tab", "Close the current tab", Icons.Outlined.Close, "") { browser.current?.let { browser.closeTab(it) } })
+            add(Command("Customize", "Theme, colours, font, start page, app icon", Icons.Outlined.Palette, "theme look appearance colour color accent font wallpaper icon dark light") { open(SheetKind.Customize) })
             add(Command("Settings", "Search engine, privacy", Icons.Outlined.Settings, "preferences options") { open(SheetKind.Settings) })
             browser.spaces.forEach { s ->
                 add(Command("Switch to ${s.name}", "Space", spaceIcon(s.icon), "space") { browser.switchSpace(s.id) })
@@ -185,6 +191,8 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
         ) {
             Column(Modifier.fillMaxSize().imePadding()) {
                 if (page) Spacer(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(topTint))
+                // A bar at the top sits above the page instead of floating over it.
+                if (barTop && page) Spacer(Modifier.fillMaxWidth().height(TopBarSpace).background(topTint))
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     if (tab != null && !tab.showHome) WebHost(tab.webView, Modifier.fillMaxSize())
                     if (tab != null && !tab.showHome && !tab.painted) LoadingVeil(tab)
@@ -197,6 +205,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
                             onShields = { open(SheetKind.Shields) },
                             onProfiles = { open(SheetKind.Profiles) },
                             onAddSites = { open(SheetKind.QuickAdd) },
+                            onCustomize = { open(SheetKind.Customize) },
                         )
                     }
                     if (tab?.flowBlocked != null) FlowInterstitial(tab)
@@ -204,23 +213,27 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
             }
 
             val barVisible = !pulse && !deck && !browser.findOpen && browser.reader == null && !(imeVisible && page)
-            AnimatedVisibility(
-                visible = barVisible,
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut(),
-                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
-            ) {
-                OrbitBar(
-                    tab = tab,
-                    tabCount = if (ghost) browser.ghostTabs.size else browser.tabsIn(browser.currentSpaceId).size,
-                    radial = radial,
-                    radialItems = radialItems,
-                    onPulse = { pulse = true },
-                    onDeck = { deck = true },
-                    onMenu = { open(SheetKind.Menu) },
-                    onSpaces = { open(SheetKind.Spaces) },
-                    onShields = { open(SheetKind.Shields) },
-                )
+            // Rebuilt when the bar moves, so its window-inset padding switches sides.
+            key(barTop) {
+                AnimatedVisibility(
+                    visible = barVisible,
+                    enter = slideInVertically { if (barTop) -it else it } + fadeIn(),
+                    exit = slideOutVertically { if (barTop) -it else it } + fadeOut(),
+                    modifier = if (barTop) Modifier.align(Alignment.TopCenter).statusBarsPadding()
+                    else Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
+                ) {
+                    OrbitBar(
+                        tab = tab,
+                        tabCount = if (ghost) browser.ghostTabs.size else browser.tabsIn(browser.currentSpaceId).size,
+                        radial = radial,
+                        radialItems = radialItems,
+                        onPulse = { pulse = true },
+                        onDeck = { deck = true },
+                        onMenu = { open(SheetKind.Menu) },
+                        onSpaces = { open(SheetKind.Spaces) },
+                        onShields = { open(SheetKind.Shields) },
+                    )
+                }
             }
 
             if (browser.findOpen) {
@@ -228,7 +241,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
             }
 
             NoticeHost(
-                Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = if (barVisible) 86.dp else 20.dp),
+                Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = if (barVisible && !barTop) 86.dp else 20.dp),
             )
 
             AnimatedVisibility(
@@ -264,7 +277,8 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
             SheetKind.Shields -> ShieldsSheet(tab) { sheet = null }
             SheetKind.Spaces -> SpacesSheet { sheet = null }
             SheetKind.Flow -> FlowSheet { sheet = null }
-            SheetKind.Settings -> SettingsSheet { sheet = null }
+            SheetKind.Settings -> SettingsSheet(onCustomize = { sheet = SheetKind.Customize }) { sheet = null }
+            SheetKind.Customize -> CustomizeSheet { sheet = null }
             SheetKind.Trail -> TrailSheet(tab) { sheet = null }
             SheetKind.Profiles -> ProfilesSheet { sheet = null }
             SheetKind.QuickAdd -> QuickAddSheet { sheet = null }
@@ -273,6 +287,9 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
         if (browser.linkMenu != null) LinkMenu { browser.linkMenu = null }
     }
 }
+
+/** Room the top address bar takes above a page (bar height plus its padding). */
+private val TopBarSpace = 68.dp
 
 @Composable
 private fun StatusBarIcons(light: Boolean, lightNav: Boolean) {

@@ -1,4 +1,4 @@
-package app.orbitline.ui
+package app.orbit.ui
 
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
@@ -67,9 +67,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.orbitline.core.Images
-import app.orbitline.core.Url
-import app.orbitline.core.UserProfile
+import app.orbit.core.Images
+import app.orbit.core.Url
+import app.orbit.core.UserProfile
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -95,9 +95,10 @@ fun rememberHaptics(): Haptics {
 // Press feedback: a neutral, bounded ripple clipped to the element's shape.
 // ---------------------------------------------------------------------------------------------
 
-val R6 = RoundedCornerShape(6.dp)
-val R8 = RoundedCornerShape(8.dp)
-val R12 = RoundedCornerShape(12.dp)
+// Corner shapes follow the "Corners" choice in Customize.
+val R6: Shape get() = Orb.tiny
+val R8: Shape get() = Orb.small
+val R12: Shape get() = Orb.large
 
 @OptIn(ExperimentalFoundationApi::class)
 fun Modifier.tap(
@@ -156,7 +157,7 @@ fun SiteIcon(url: String, size: Dp, favicon: ImageBitmap? = null, shape: Shape =
  * loads. Same geometry as res/drawable/orbit_mark.xml (24-unit grid).
  */
 @Composable
-fun OrbitSpinner(size: Dp, modifier: Modifier = Modifier, color: Color = Orb.Text2) {
+fun OrbitSpinner(size: Dp, modifier: Modifier = Modifier, color: Color = Orb.Tint) {
     val spin = rememberInfiniteTransition(label = "orbit")
     val angle by spin.animateFloat(0f, 360f, infiniteRepeatable(tween(1100, easing = LinearEasing)), label = "moon")
     Canvas(modifier.size(size).semantics { contentDescription = "Loading" }) {

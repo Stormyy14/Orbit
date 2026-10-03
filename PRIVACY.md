@@ -53,6 +53,12 @@ from your Google Account → Data & privacy → Third-party apps, or by revoking
 
 - **Internet / network state** — to load web pages.
 - **Vibration** — for haptic feedback (can be turned off in Settings).
+- **Notifications** and **foreground service (media playback)** — to show media controls and keep
+  video or music playing while Orbit is in the background. Asked for the first time something plays;
+  "Keep playing in the background" in Settings turns it off.
+
+A start page wallpaper is picked with the system photo picker, so Orbit only gets the one image you
+choose. A scaled-down copy is kept in Orbit's private storage on this device; it isn't synced.
 
 Website requests for your camera, microphone and location are always refused.
 

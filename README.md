@@ -47,6 +47,8 @@ Release signing certificate SHA-256:
 | **Hide elements** | Tap any part of a page to hide it on that site for good. You can undo it from Shields. |
 | **Reader view** | Articles with Dark / Paper / Light themes, serif or sans, adjustable size. |
 | **Tab history** | Every page the current tab has visited. Tap one to jump back. |
+| **Customize** | Theme (System, Light, Dark, true Black), accent colour, corner style, font (Geist, System, Serif, Mono), app text size, web page text size, address bar at the top or bottom, full address or domain, start page sections (clock, search, orbit, recently visited), a start page wallpaper from your photos, and the launcher icon. Saved per profile; open it from the palette button on the start page or *Menu → Customize*. |
+| **Background play** | Video and music keep playing with Orbit minimized or the screen off, with play/pause, previous/next and seek in the notification, on the lock screen and from headset buttons. Tap the notification to jump back to the tab. Can be turned off in Settings. |
 
 There's also:
 - A loading page shows the Orbit mark spinning: the moon travels round its orbit.
@@ -98,17 +100,18 @@ Requirements: JDK 17, Android SDK 36.
 ./gradlew :app:assembleRelease    # minified release
 ```
 
-Release signing is read from `~/.gradle/gradle.properties` (`ORBITLINE_STORE_FILE`,
-`ORBITLINE_STORE_PASSWORD`, `ORBITLINE_KEY_ALIAS`, `ORBITLINE_KEY_PASSWORD`). Without those
+Release signing is read from `~/.gradle/gradle.properties` (`ORBIT_STORE_FILE`,
+`ORBIT_STORE_PASSWORD`, `ORBIT_KEY_ALIAS`, `ORBIT_KEY_PASSWORD`). Without those
 properties, release builds are signed with the local debug key, so anyone can build.
 
-App ID: `io.github.stormyy14.orbitline`, code package `app.orbitline`. These keep the old name on
-purpose: changing the app ID would stop new releases from updating installed copies.
+Code package: `app.orbit`. The app ID stays `io.github.stormyy14.orbitline` from the app's first
+release: changing it would stop new versions from updating installed copies. For the same reason the
+classic launcher entry keeps its original component name (see `AndroidManifest.xml`).
 
 ## Project layout
 
 ```
-app/src/main/java/app/orbitline/
+app/src/main/java/app/orbit/
   MainActivity.kt        edge-to-edge host, file chooser, theme changes
   core/Browser.kt        engine: tabs, spaces/profiles, WebView wiring and policy, focus, ghosts
   core/Tab.kt            observable tab state
@@ -117,6 +120,8 @@ app/src/main/java/app/orbitline/
   core/Url.kt            address resolution, !bangs, site names from titles
   core/Images.kt         favicon cache and fetching
   core/Store.kt          debounced JSON persistence
+  core/Media.kt          media notification, lock-screen controls, background playback service
+  core/Customize.kt      start page wallpapers, launcher icon choices
   ui/StartPage.kt        orbit start page, ghost start page
   ui/OrbitBar.kt         bottom bar, gestures, quick-action arc
   ui/Pulse.kt            search / command palette
@@ -124,7 +129,8 @@ app/src/main/java/app/orbitline/
   ui/Sheets.kt           menu, shields, spaces, focus, settings, licenses, tab history, link menu
   ui/Overlays.kt         preview, reader, find, focus screen, toasts
   ui/SpaceIcons.kt       the icons a space can use
-  ui/Theme.kt            tokens (Orb.*), Geist type scale
+  ui/Customize.kt        the Customize sheet
+  ui/Theme.kt            tokens (Orb.*), palettes, accents, fonts, type scale
 branding/                logo sources and renders
 tools/logo.py            regenerates the logo, launcher icon and in-app mark
 ```

@@ -1,4 +1,4 @@
-package app.orbitline.ui
+package app.orbit.ui
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -64,8 +64,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import app.orbitline.core.Tab
-import app.orbitline.core.Url
+import app.orbit.core.Tab
+import app.orbit.core.Url
 import kotlin.math.abs
 import kotlinx.coroutines.launch
 

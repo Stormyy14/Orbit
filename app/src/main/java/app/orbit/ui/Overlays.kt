@@ -1,4 +1,4 @@
-package app.orbitline.ui
+package app.orbit.ui
 
 import android.view.View
 import android.view.ViewGroup
@@ -87,11 +87,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import app.orbitline.core.Images
-import app.orbitline.core.ReaderBlock
-import app.orbitline.core.ReaderDoc
-import app.orbitline.core.Tab
-import app.orbitline.core.Url
+import app.orbit.core.Images
+import app.orbit.core.ReaderBlock
+import app.orbit.core.ReaderDoc
+import app.orbit.core.Tab
+import app.orbit.core.Url
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 

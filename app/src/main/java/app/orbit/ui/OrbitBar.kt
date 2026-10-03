@@ -1,4 +1,4 @@
-package app.orbitline.ui
+package app.orbit.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
@@ -70,8 +70,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.orbitline.core.Tab
-import app.orbitline.core.Url
+import app.orbit.core.Tab
+import app.orbit.core.Url
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -105,14 +105,21 @@ class RadialState(
         private set
     var rootWidth by mutableFloatStateOf(0f)
     val radius get() = radiusPx
+    /** True when the bar is at the top: the arc opens downwards, mirrored. */
+    var below by mutableStateOf(false)
+        private set
+    /** Where the arc starts and how far it sweeps, in degrees (clockwise, 0 = right). */
+    val arcStart get() = if (below) 360.0 - ARC_START else ARC_START
+    val arcSweep get() = if (below) -ARC_SWEEP else ARC_SWEEP
 
-    fun angleOf(i: Int): Double = Math.toRadians(ARC_START + i * ARC_SWEEP / (items.size - 1).coerceAtLeast(1))
+    fun angleOf(i: Int): Double = Math.toRadians(arcStart + i * arcSweep / (items.size - 1).coerceAtLeast(1))
 
-    fun begin(origin: Offset, list: List<RadialItem>) {
+    fun begin(origin: Offset, list: List<RadialItem>, below: Boolean = false) {
         items = list
+        this.below = below
         val minX = radiusPx + marginPx
         val maxX = (rootWidth - radiusPx - marginPx).coerceAtLeast(minX)
-        center = Offset(origin.x.coerceIn(minX, maxX), origin.y - liftPx)
+        center = Offset(origin.x.coerceIn(minX, maxX), if (below) origin.y + liftPx else origin.y - liftPx)
         selected = -1
         active = true
     }
@@ -125,7 +132,10 @@ class RadialState(
         if (sqrt(dx * dx + dy * dy) > deadPx) {
             var a = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble()))
             if (a < 0) a += 360.0
-            if (a in 0.0..90.0) a = ARC_START + ARC_SWEEP else if (a in 90.0..180.0) a = ARC_START
+            // Pointing away from the arc snaps to its nearest end.
+            if (below) {
+                if (a in 270.0..360.0) a = arcStart + arcSweep else if (a in 180.0..270.0) a = arcStart
+            } else if (a in 0.0..90.0) a = ARC_START + ARC_SWEEP else if (a in 90.0..180.0) a = ARC_START
             var best = Double.MAX_VALUE
             items.indices.forEach { i ->
                 val d = abs(Math.toDegrees(angleOf(i)) - a)
@@ -158,7 +168,7 @@ fun RadialOverlay(state: RadialState) {
         Canvas(Modifier.fillMaxSize()) {
             val r = state.radius
             drawArc(
-                Orb.BorderStrong, ARC_START.toFloat(), ARC_SWEEP.toFloat(), false,
+                Orb.BorderStrong, state.arcStart.toFloat(), state.arcSweep.toFloat(), false,
                 topLeft = Offset(state.center.x - r, state.center.y - r), size = Size(r * 2, r * 2),
                 style = Stroke(1.dp.toPx()),
             )
@@ -192,7 +202,10 @@ fun RadialOverlay(state: RadialState) {
         }
         Box(
             Modifier
-                .offset { IntOffset(0, (state.center.y - state.radius - 84.dp.toPx()).roundToInt()) }
+                .offset {
+                    val y = if (state.below) state.center.y + state.radius + 40.dp.toPx() else state.center.y - state.radius - 84.dp.toPx()
+                    IntOffset(0, y.roundToInt())
+                }
                 .fillMaxWidth(),
             contentAlignment = Alignment.Center,
         ) {
@@ -234,7 +247,9 @@ fun OrbitBar(
     val offsetX = remember { Animatable(0f) }
     val offsetY = remember { Animatable(0f) }
     var barOrigin by remember { mutableStateOf(Offset.Zero) }
-    val collapsed = browser.barCollapsed && tab != null && !tab.showHome
+    val atTop = browser.settings.barTop
+    val collapsed = browser.barCollapsed && tab != null && !tab.showHome && !atTop
+    val address: (Tab) -> String = { t -> if (browser.settings.fullAddress) t.url else Url.pretty(t.url) }
 
     val switchPx = with(density) { 80.dp.toPx() }
     val deckPx = with(density) { 54.dp.toPx() }
@@ -263,7 +278,7 @@ fun OrbitBar(
 
             if (!dragging) {
                 haptics.heavy()
-                radial.begin(barOrigin + down.position, items())
+                radial.begin(barOrigin + down.position, items(), below = atTop)
                 while (true) {
                     val ev = awaitPointerEvent(PointerEventPass.Initial)
                     val c = ev.changes.firstOrNull { it.id == down.id } ?: break
@@ -344,7 +359,7 @@ fun OrbitBar(
                         if (tab?.loading == true) OrbitSpinner(14.dp) else LockGlyph(tab, 12)
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            tab?.let { Url.pretty(it.url) } ?: "",
+                            tab?.let(address) ?: "",
                             color = Orb.Text, fontSize = 13.sp, fontWeight = FontWeight.Medium, fontFamily = Geist,
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
@@ -391,7 +406,7 @@ fun OrbitBar(
                                 if (tab.loading) OrbitSpinner(18.dp) else LockGlyph(tab, 14)
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    Url.pretty(tab.url),
+                                    address(tab),
                                     color = Orb.Text, style = MaterialTheme.typography.titleSmall,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f, fill = false),
