@@ -15,10 +15,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/start.png" width="200" alt="Start page with sites on orbits">
-  <img src="docs/screenshots/shields.png" width="200" alt="Shields: ad and tracker blocking">
-  <img src="docs/screenshots/vpn.png" width="200" alt="Orbit VPN connected through Tor">
-  <img src="docs/screenshots/tabs.png" width="200" alt="Tabs grouped by site">
+  <img src="docs/screenshots/start.png" width="160" alt="Start page with sites on orbits">
+  <img src="docs/screenshots/shields.png" width="160" alt="Shields: ad and tracker blocking">
+  <img src="docs/screenshots/vpn.png" width="160" alt="Orbit VPN connected through Tor">
+  <img src="docs/screenshots/ghost.png" width="160" alt="A ghost tab">
+  <img src="docs/screenshots/tabs.png" width="160" alt="Tabs grouped by site">
 </p>
 
 ## Why Orbit

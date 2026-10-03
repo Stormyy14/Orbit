@@ -14,6 +14,16 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.rememberCoroutineScope
@@ -55,7 +65,6 @@ import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Timer
-import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -436,24 +445,85 @@ private fun OrbitView(items: List<Favorite>, space: Space, onCenter: () -> Unit,
 private fun GhostStart(onPulse: () -> Unit) {
     val browser = LocalBrowser.current
     val haptics = rememberHaptics()
-    Column(Modifier.fillMaxSize().background(Orb.Bg).statusBarsPadding().padding(top = 28.dp)) {
-        Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.VisibilityOff, null, tint = Orb.Ghost, modifier = Modifier.size(22.dp))
-            Spacer(Modifier.width(10.dp))
-            Text("Ghost tab", style = MaterialTheme.typography.titleLarge)
-        }
+    val s = browser.settings
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Orb.Bg)
+            .statusBarsPadding()
+            .padding(top = if (s.barTop) 68.dp else 0.dp, bottom = if (s.barTop) 32.dp else 120.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(Modifier.weight(1f))
+        GhostMark(132.dp)
+        Spacer(Modifier.height(16.dp))
+        Text("Ghost tab", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "Not saved to history. Closes after ${browser.settings.ghostMinutes} min in the background.",
+            "No history, and its cookies are wiped when it closes. " +
+                "Closes itself after ${s.ghostMinutes} min in the background.",
             style = MaterialTheme.typography.bodyMedium,
             color = Orb.Text2,
-            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(start = 40.dp, end = 40.dp, top = 8.dp),
         )
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(28.dp))
         SearchField("Search privately", onPulse)
         Spacer(Modifier.height(12.dp))
-        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SecondaryButton("Close all ghost tabs", color = Orb.Red) { haptics.heavy(); browser.burnGhosts() }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SecondaryButton("Back to ${browser.currentSpace.name}") { browser.switchSpace(browser.currentSpaceId) }
+            SecondaryButton("Close ghost tabs", color = Orb.Red) { haptics.heavy(); browser.burnGhosts() }
+        }
+        Spacer(Modifier.weight(1.3f))
+    }
+}
+
+/** A little ghost that floats over its shadow, on a soft halo. */
+@Composable
+private fun GhostMark(size: Dp) {
+    val float = rememberInfiniteTransition(label = "ghost")
+    val t by float.animateFloat(
+        0f, 1f, infiniteRepeatable(tween(2400, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "float",
+    )
+    val body = Orb.Ghost
+    val eyes = Orb.Bg
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width
+        drawCircle(body.copy(alpha = 0.09f), w * 0.48f, center)
+        // The shadow shrinks and fades as the ghost rises.
+        val shadowW = w * (0.34f - 0.08f * t)
+        drawOval(
+            body.copy(alpha = 0.2f - 0.08f * t),
+            topLeft = Offset(center.x - shadowW / 2, w * 0.8f),
+            size = Size(shadowW, w * 0.045f),
+        )
+        translate(top = -w * 0.05f * t) {
+            val bw = w * 0.44f
+            val left = center.x - bw / 2
+            val top = w * 0.17f
+            val bottom = w * 0.7f
+            val tails = 3
+            val tail = bw / tails
+            val ghost = Path().apply {
+                moveTo(left, bottom)
+                lineTo(left, top + bw / 2)
+                arcTo(Rect(left, top, left + bw, top + bw), 180f, 180f, false)
+                lineTo(left + bw, bottom)
+                for (i in 0 until tails) {
+                    val x = left + bw - i * tail
+                    quadraticTo(x - tail / 2, bottom + tail * 0.75f, x - tail, bottom)
+                }
+                close()
+            }
+            drawPath(ghost, body)
+            val eyeW = w * 0.05f
+            val eyeH = w * 0.08f
+            listOf(-1f, 1f).forEach { side ->
+                drawOval(
+                    eyes,
+                    topLeft = Offset(center.x + side * bw * 0.18f - eyeW / 2, top + bw * 0.42f),
+                    size = Size(eyeW, eyeH),
+                )
+            }
         }
     }
 }
