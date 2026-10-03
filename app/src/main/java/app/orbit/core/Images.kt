@@ -77,9 +77,7 @@ object Images {
     private fun fetchIcon(host: String): ImageBitmap? {
         for (path in listOf("/apple-touch-icon.png", "/favicon.ico")) {
             val bmp = runCatching {
-                val conn = URL("https://$host$path").openConnection() as HttpURLConnection
-                conn.connectTimeout = 4000
-                conn.readTimeout = 4000
+                val conn = Net.open("https://$host$path", connectMs = 4000, readMs = 4000)
                 conn.instanceFollowRedirects = true
                 conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) Orbit")
                 if (conn.responseCode != 200) return@runCatching null
@@ -96,9 +94,7 @@ object Images {
 
     suspend fun remote(url: String, maxWidth: Int = 1200): ImageBitmap? = withContext(Dispatchers.IO) {
         memory.get(url) ?: runCatching {
-            val conn = URL(url).openConnection() as HttpURLConnection
-            conn.connectTimeout = 8000
-            conn.readTimeout = 10000
+            val conn = Net.open(url, connectMs = 8000, readMs = 10000)
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) Orbit")
             val bytes = conn.inputStream.use { readCapped(it, 15 shl 20) } ?: return@runCatching null
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

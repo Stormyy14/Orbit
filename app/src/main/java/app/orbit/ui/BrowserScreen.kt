@@ -2,6 +2,8 @@ package app.orbit.ui
 
 import androidx.compose.runtime.rememberCoroutineScope
 import app.orbit.core.Updates
+import app.orbit.core.Vpn
+import androidx.compose.material.icons.outlined.VpnLock
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.runtime.key
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -134,7 +136,8 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
             add(Command("Find in page", "Search text on this page", Icons.Outlined.FindInPage, "search text") { browser.findOpen = true })
             add(Command("Hide elements", "Remove parts of this page", Icons.Outlined.AutoFixHigh, "zap block remove") { browser.toggleZap() })
             add(Command("Focus", "Block distracting sites", Icons.Outlined.Timer, "flow pomodoro timer") { open(SheetKind.Flow) })
-            add(Command("Shields", "Tracker blocking", Icons.Outlined.Shield, "privacy block ads") { open(SheetKind.Shields) })
+            add(Command("Shields", "Ad and tracker blocking", Icons.Outlined.Shield, "privacy block ads adblock trackers cookies") { open(SheetKind.Shields) })
+            add(Command("Orbit VPN", "Hide your IP address", Icons.Outlined.VpnLock, "vpn tor proxy ip location anonymous privacy") { open(SheetKind.Vpn) })
             add(Command("Spaces", "Switch or edit spaces", Icons.Outlined.Layers, "containers") { open(SheetKind.Spaces) })
             add(Command("Profiles", "Switch profile or sign in with Google", Icons.Outlined.AccountCircle, "account google sync login user") { open(SheetKind.Profiles) })
             add(Command("Add sites", "Put sites on the orbit", Icons.Outlined.Star, "orbit quick add favorites") { open(SheetKind.QuickAdd) })
@@ -213,6 +216,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     if (tab != null && !tab.showHome) WebHost(tab.webView, Modifier.fillMaxSize())
                     if (tab != null && !tab.showHome && !tab.painted) LoadingVeil(tab)
+                    if (tab != null && !tab.showHome && Vpn.enabled && Vpn.state != Vpn.State.ON) VpnVeil { open(SheetKind.Vpn) }
                     if (tab != null && tab.showHome) {
                         StartPage(
                             tab,
@@ -293,9 +297,15 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
         when (sheet) {
             SheetKind.Menu -> PageMenu(tab, ::open) { sheet = null }
             SheetKind.Shields -> ShieldsSheet(tab) { sheet = null }
+            SheetKind.Vpn -> VpnSheet { sheet = null }
             SheetKind.Spaces -> SpacesSheet { sheet = null }
             SheetKind.Flow -> FlowSheet { sheet = null }
-            SheetKind.Settings -> SettingsSheet(onCustomize = { sheet = SheetKind.Customize }, onUpdate = { sheet = SheetKind.Update }) { sheet = null }
+            SheetKind.Settings -> SettingsSheet(
+                onCustomize = { sheet = SheetKind.Customize },
+                onUpdate = { sheet = SheetKind.Update },
+                onShields = { sheet = SheetKind.Shields },
+                onVpn = { sheet = SheetKind.Vpn },
+            ) { sheet = null }
             SheetKind.Update -> UpdateSheet { sheet = null }
             SheetKind.Customize -> CustomizeSheet { sheet = null }
             SheetKind.Trail -> TrailSheet(tab) { sheet = null }

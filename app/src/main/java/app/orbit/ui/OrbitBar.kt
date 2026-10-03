@@ -71,6 +71,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.orbit.core.Tab
+import app.orbit.core.Vpn
+import androidx.compose.material.icons.outlined.VpnLock
 import app.orbit.core.Url
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -404,6 +406,14 @@ fun OrbitBar(
                                 )
                             } else {
                                 if (tab.loading) OrbitSpinner(18.dp) else LockGlyph(tab, 14)
+                                if (Vpn.enabled) {
+                                    Spacer(Modifier.width(4.dp))
+                                    Icon(
+                                        Icons.Outlined.VpnLock, "Orbit VPN",
+                                        tint = if (Vpn.state == Vpn.State.ON) Orb.Text2 else Orb.Red,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                }
                                 Spacer(Modifier.width(6.dp))
                                 Text(
                                     address(tab),

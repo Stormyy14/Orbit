@@ -8,13 +8,7 @@ object Url {
     fun host(url: String?): String? = runCatching { Uri.parse(url).host?.lowercase() }.getOrNull()
 
     /** "www.m.example.co.uk" -> "example.co.uk" (good-enough eTLD+1 heuristic). */
-    fun site(host: String): String {
-        val parts = host.lowercase().removePrefix("www.").split('.')
-        if (parts.size <= 2) return parts.joinToString(".")
-        val sld = parts[parts.size - 2]
-        val twoLevel = sld.length <= 3 && sld in setOf("co", "com", "org", "net", "gov", "ac", "edu", "ne", "or", "gob")
-        return parts.takeLast(if (twoLevel) 3 else 2).joinToString(".")
-    }
+    fun site(host: String): String = Domains.site(host)
 
     fun sameSite(a: String, b: String) = site(a) == site(b)
 

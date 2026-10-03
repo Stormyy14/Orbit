@@ -169,7 +169,7 @@ class GoogleSync(private val activity: ComponentActivity) {
     }
 
     private fun request(method: String, url: String, token: String, body: String? = null, type: String? = null): String {
-        val conn = URL(url).openConnection() as HttpURLConnection
+        val conn = Net.open(url, connectMs = 10_000, readMs = 20_000)
         try {
             try {
                 conn.requestMethod = method
@@ -178,8 +178,6 @@ class GoogleSync(private val activity: ComponentActivity) {
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("X-HTTP-Method-Override", method)
             }
-            conn.connectTimeout = 10_000
-            conn.readTimeout = 20_000
             conn.useCaches = false
             conn.setRequestProperty("Authorization", "Bearer $token")
             if (body != null) {

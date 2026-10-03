@@ -111,8 +111,13 @@ enum class FontChoice(val label: String) { GEIST("Geist"), SYSTEM("System"), SER
 data class Settings(
     val engine: SearchEngine = SearchEngine.GOOGLE,
     val suggestions: Boolean = true,
+    /** Shields as a whole; the switches below choose what they do. */
     val shields: Boolean = true,
+    val blockAds: Boolean = true,
+    val blockTrackers: Boolean = true,
     val hideCookieBanners: Boolean = true,
+    /** Removes tracking parameters (utm_*, fbclid, gclid, …) from links you open. */
+    val cleanLinks: Boolean = true,
     val ghostMinutes: Int = 15,
     val haptics: Boolean = true,
     val darkPages: Boolean = false,
@@ -162,7 +167,10 @@ data class Settings(
         .put("engine", engine.name)
         .put("suggestions", suggestions)
         .put("shields", shields)
+        .put("ads", blockAds)
+        .put("trackers", blockTrackers)
         .put("cookies", hideCookieBanners)
+        .put("cleanLinks", cleanLinks)
         .put("ghostMinutes", ghostMinutes)
         .put("haptics", haptics)
         .put("darkPages", darkPages)
@@ -197,7 +205,10 @@ data class Settings(
                 engine = engine,
                 suggestions = o.optBoolean("suggestions", d.suggestions),
                 shields = o.optBoolean("shields", d.shields),
+                blockAds = o.optBoolean("ads", d.blockAds),
+                blockTrackers = o.optBoolean("trackers", d.blockTrackers),
                 hideCookieBanners = o.optBoolean("cookies", d.hideCookieBanners),
+                cleanLinks = o.optBoolean("cleanLinks", d.cleanLinks),
                 ghostMinutes = o.optInt("ghostMinutes", d.ghostMinutes),
                 haptics = o.optBoolean("haptics", d.haptics),
                 darkPages = o.optBoolean("darkPages", d.darkPages),

@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.webkit.ScriptHandler
 import java.util.UUID
 
 class Tab(
@@ -48,6 +49,19 @@ class Tab(
 
     @Volatile
     var pageHost: String? = Url.host(url)
+    /** Page-wide filter exceptions for the page shown (see [Shields.pageFlags]). */
+    @Volatile
+    var shieldFlags: Int = 0
+
+    /** Document-start scripts that come and go with settings (YouTube ads, no WebRTC under the VPN). */
+    var youtubeScript: ScriptHandler? = null
+    var noRtcScript: ScriptHandler? = null
+    /** A load waiting for Orbit VPN's route to be in place. */
+    var pendingUrl: String? = null
+    /** The last link cleaned of tracking parameters, so a site that insists isn't sent round in circles. */
+    var cleanedUrl: String? = null
+    /** The host last moved from http to https (Orbit VPN), so a failure can offer plain http. */
+    var upgradedHost: String? = null
 
     val displayTitle: String
         get() = when {

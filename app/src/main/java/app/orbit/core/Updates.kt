@@ -311,9 +311,7 @@ object Updates {
         }
     }
 
-    private fun open(url: String): HttpURLConnection = (URL(url).openConnection() as HttpURLConnection).apply {
-        connectTimeout = 15_000
-        readTimeout = 30_000
+    private fun open(url: String): HttpURLConnection = Net.open(url, connectMs = 15_000, readMs = 30_000).apply {
         instanceFollowRedirects = true
         setRequestProperty("User-Agent", "Orbit/$current (Android)")
     }

@@ -18,9 +18,18 @@ Only the latest release receives security fixes.
 Orbit relies on **Android System WebView** for the web engine, so keep WebView updated from
 Google Play. That's where most browser-engine security fixes arrive. On top of WebView:
 
-- **No JavaScript interface.** Pages can't call app code. The only page → app channel is a
-  `WebMessageListener` that accepts messages only from the main frame of the page you're on,
-  and only while you're using "Hide elements".
+- **No JavaScript interface.** Pages can't call app code. Page → app messages go through
+  `WebMessageListener`s with narrow jobs: "Hide elements" (top frame of the current page, only
+  while it's on), media controls (shown in the notification only), and Shields, which accepts a
+  frame's class names and ids and only ever answers with CSS built from the filter lists.
+- **Filter lists are treated as untrusted input.** They're downloaded over https, must look like
+  filter lists, and are size-capped. Rules that run code (snippets, scriptlets) or rewrite
+  requests are never used. Element-hiding selectors can't break out of their CSS rule (no braces,
+  `;`, comments or unbalanced brackets), and regular-expression rules run with a step budget.
+- **Orbit VPN fails closed.** While it's on but not connected, WebView's proxy points at a port no
+  app can open, so nothing loads directly; the app's own requests refuse to go out too. Host
+  names are resolved by Tor (SOCKS5), WebRTC is removed from pages (including fresh same-origin
+  frames), and http sites are tried over https first.
 - **No local access.** File and content access are disabled, and `file:`, `content:`,
   `javascript:` and `intent:` URLs typed or pasted into the address bar are treated as searches.
 - **Other apps need a tap.** Links to other apps (`intent:`, `market:` …) only open from a tap;

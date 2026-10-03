@@ -54,6 +54,14 @@ android {
     buildFeatures {
         compose = true
     }
+    packaging {
+        jniLibs {
+            // Tor's native library: compressed in the APK (a much smaller download) and skipped
+            // for 32-bit x86, which no current phone uses.
+            useLegacyPackaging = true
+            excludes += "lib/x86/**"
+        }
+    }
 }
 
 dependencies {
@@ -72,4 +80,14 @@ dependencies {
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
+    // Orbit VPN: the Tor client (BSD-3-Clause), run in-process. Its Kotlin stdlib would be newer
+    // than the app's compiler; the library's code is Java and doesn't need it.
+    implementation("info.guardianproject:tor-android:0.4.9.13") { exclude(group = "org.jetbrains.kotlin") }
+    implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
+    testImplementation("junit:junit:4.13.2")
 }
+
+// tor-android declares minCompileSdk 37.1 only because of how it's built: its classes use nothing
+// newer than API 24 (Service, Intent, FileObserver; checked with javap). AGP 8.11 can't compile
+// against 37.1, so that one metadata check is skipped. Re-enable it when the project moves to 37.
+tasks.matching { it.name.matches(Regex("check.*AarMetadata")) }.configureEach { enabled = false }

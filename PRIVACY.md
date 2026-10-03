@@ -1,6 +1,6 @@
 # Privacy policy
 
-_Last updated: 2 October 2026 (0.6.0)_
+_Last updated: 3 October 2026 (Shields filter lists, Orbit VPN)_
 
 Orbit is a web browser. It has **no analytics, no ads, no crash reporting and no servers
 of its own**. The developer receives no data from the app. Accounts are optional: you can add a
@@ -12,7 +12,8 @@ Stored only in the app's private storage, never uploaded, and excluded from Andr
 backup and device-to-device transfer:
 
 - Open tabs (so they can be restored), browsing history, favorites and spaces
-- Settings, the elements you hid on sites, tracker-blocking counts
+- Settings, the elements you hid on sites, tracker-blocking counts, and whether Orbit VPN is on
+- The downloaded filter lists, and Tor's network directory (so Orbit VPN connects faster next time)
 - Cached site icons
 - Cookies and site data, managed by Android System WebView
 
@@ -26,7 +27,9 @@ Settings → Data, or uninstall the app to remove everything.
 
 | When | Sent to | What |
 |---|---|---|
-| You visit a website | That website (and anything it loads) | A normal browser request. Third-party trackers on the blocklist and third-party cookies are blocked while Shields is on. |
+| You visit a website | That website (and anything it loads) | A normal browser request. Ads and trackers on the filter lists and third-party cookies are blocked while Shields is on, and known tracking parameters are removed from links. Pages also receive the Global Privacy Control signal. |
+| Every few days, while Shields is on | `easylist.to` and `secure.fanboy.co.nz` (fallback: `easylist-downloads.adblockplus.org`) | A download of the public filter lists. Nothing about you or your browsing is sent; all matching happens on the device. |
+| Orbit VPN is on | The Tor network (volunteer-run relays), then the website | Everything Orbit loads goes through three Tor relays: the first sees your IP address but not what you open, the last sees which site you open (and its content, if the site isn't https) but not your IP address. Orbit opens http sites over https where it can. When it connects, Orbit asks `check.torproject.org` (through Tor) to confirm the connection. Downloads, which Android's download manager handles, don't go through Tor. |
 | You type in the address bar with "Show search suggestions" on (not in ghost tabs) | Google (`suggestqueries.google.com`) when Google is your search engine, otherwise DuckDuckGo (`ac.duckduckgo.com`) | The text you typed, to get suggestions. No cookies or identifiers are sent. You can turn this off in Settings. |
 | You add or use a Google profile | Google (sign-in, Google Drive API, and `googleusercontent.com` for your account photo) | Your sign-in, and your profile's data (below), stored in the hidden app-data folder of your own Google Drive. Only this app can read it. Your account photo is downloaded to show on the profile. |
 | You search | The search engine you chose in Settings | Your search, as on any browser. |

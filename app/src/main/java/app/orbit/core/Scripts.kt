@@ -130,6 +130,85 @@ else if(c.indexOf('seek:')===0&&el){el.currentTime=parseFloat(c.slice(5))/1000;}
 }catch(e){}};
 })();"""
 
+    /**
+     * Shields, at document start in every frame. Asks the app (via OrbitShields) for the frame's
+     * element-hiding CSS, then reports the class names and ids that appear on the page, so only
+     * the generic rules that can match are applied (the lists have tens of thousands). The app
+     * only ever answers with CSS built from the filter lists. Also signals Global Privacy Control.
+     */
+    const val SHIELDS = """
+(function(){var B=window.OrbitShields;if(!B||window.__orbitShields)return;window.__orbitShields=1;
+var D=document,P=JSON.parse,S=JSON.stringify,sheet=null,el=null,on=false,done=false,timer=0,n=0,qc=[],qi=[],sc=Object.create(null),si=Object.create(null),obs=null;
+try{Object.defineProperty(Navigator.prototype,'globalPrivacyControl',{configurable:true,enumerable:true,get:function(){return true;}});}catch(e){}
+function attach(){try{if(sheet&&D.adoptedStyleSheets.indexOf(sheet)<0)D.adoptedStyleSheets=D.adoptedStyleSheets.concat([sheet]);}catch(e){}}
+function add(css,first){if(!css)return;
+try{if(!sheet&&!el&&window.CSSStyleSheet&&'adoptedStyleSheets' in D)sheet=new CSSStyleSheet();}catch(e){sheet=null;}
+if(sheet){try{if(first)sheet.replaceSync(css);else{var r=css.split('\n');for(var i=0;i<r.length;i++)if(r[i])try{sheet.insertRule(r[i],sheet.cssRules.length);}catch(x){}}attach();return;}catch(e){sheet=null;}}
+try{if(!el){el=D.createElement('style');el.id='orbit-shields';}el.textContent+=css;if(!el.parentNode)(D.head||D.documentElement).appendChild(el);}catch(e){}}
+function note(e){var id=e.id;if(typeof id==='string'&&id&&!si[id]){si[id]=1;qi.push(id);n++;}
+var cl=e.classList;if(cl)for(var i=0;i<cl.length;i++){var c=cl[i];if(!sc[c]){sc[c]=1;qc.push(c);n++;}}}
+function scan(r){if(!r||r.nodeType!==1)return;note(r);var a=r.querySelectorAll('[id],[class]');for(var i=0;i<a.length;i++)note(a[i]);}
+function queue(){if(on&&!timer&&(qc.length||qi.length))timer=setTimeout(flush,done?120:0);}
+function flush(){timer=0;done=true;try{B.postMessage(S({t:'scan',c:qc.splice(0,1500),i:qi.splice(0,1500)}));}catch(e){}queue();}
+function stop(){on=false;qc=[];qi=[];if(obs)obs.disconnect();obs=null;}
+try{obs=new MutationObserver(function(ms){if(n>30000)return stop();
+for(var i=0;i<ms.length;i++){var m=ms[i];if(m.type==='attributes'){if(m.target.nodeType===1)note(m.target);}else{var a=m.addedNodes;for(var j=0;j<a.length;j++)scan(a[j]);}}
+queue();attach();});obs.observe(D,{childList:true,subtree:true,attributes:true,attributeFilter:['class','id']});}catch(e){}
+B.onmessage=function(m){var d=String(m.data||'');
+if(d.charAt(0)==='+'){add(d.slice(1),false);return;}
+var o;try{o=P(d);}catch(e){return;}
+add(o.css,true);if(o.scan){on=true;if(D.documentElement)scan(D.documentElement);queue();}else stop();};
+D.addEventListener('DOMContentLoaded',function(){attach();if(on){scan(D.documentElement);queue();}});
+try{B.postMessage(S({t:'init'}));}catch(e){}
+})();"""
+
+    /**
+     * YouTube ads, which play from the same servers as the videos: the ad slots are removed from
+     * the player's data before the player reads it, and an ad that still starts is muted and
+     * skipped. Only added on YouTube's own origins, and only while ad blocking is on there.
+     */
+    const val YOUTUBE = """
+(function(){if(window.__orbitYt)return;window.__orbitYt=1;
+var K=['adPlacements','adSlots','playerAds','adBreakHeartbeatParams'];
+function prune(o,d){if(!o||typeof o!=='object'||d>4)return o;try{
+for(var i=0;i<K.length;i++)if(K[i] in o)delete o[K[i]];
+if(o.playerResponse)prune(o.playerResponse,d+1);
+if(Array.isArray(o)){for(var j=0;j<o.length&&j<8;j++)prune(o[j],d+1);}
+else if(o.response)prune(o.response,d+1);}catch(e){}return o;}
+try{JSON.parse=new Proxy(JSON.parse,{apply:function(t,s,a){return prune(Reflect.apply(t,s,a),0);}});}catch(e){}
+try{var RP=Response.prototype;RP.json=new Proxy(RP.json,{apply:function(t,s,a){return Reflect.apply(t,s,a).then(function(r){return prune(r,0);});}});}catch(e){}
+try{var v;Object.defineProperty(window,'ytInitialPlayerResponse',{configurable:true,get:function(){return v;},set:function(x){v=prune(x,0);}});}catch(e){}
+function skip(){try{var p=document.querySelector('.ad-showing video,.ad-interrupting video');
+if(p){p.muted=true;if(isFinite(p.duration)&&p.duration>0&&p.currentTime<p.duration-0.1)p.currentTime=p.duration;}
+var b=document.querySelector('.ytp-ad-skip-button,.ytp-ad-skip-button-modern,.ytp-skip-ad-button,.ytp-ad-skip-button-container button,button.ytp-ad-skip-button-slot');if(b)b.click();}catch(e){}}
+setInterval(function(){if(!document.hidden||document.querySelector('.ad-showing'))skip();},400);
+})();"""
+
+    /**
+     * While Orbit VPN is on: no WebRTC, which can reveal the real address by going around the
+     * proxy. Same-origin child frames can be reached before their own copy of this runs, so they
+     * are cleaned when touched, and after anything is inserted into the page.
+     */
+    const val NO_WEBRTC = """
+(function(){if(window.__orbitNoRtc)return;
+var N=['RTCPeerConnection','webkitRTCPeerConnection','mozRTCPeerConnection','RTCDataChannel','RTCRtpSender','RTCRtpReceiver','RTCRtpTransceiver','RTCIceCandidate','RTCSessionDescription','RTCDtlsTransport','RTCIceTransport','RTCSctpTransport','RTCCertificate','RTCPeerConnectionIceEvent','RTCDataChannelEvent','RTCTrackEvent','RTCEncodedAudioFrame','RTCEncodedVideoFrame','RTCIceCandidatePair'];
+function off(w){try{if(!w||w.__orbitNoRtc)return;
+for(var i=0;i<N.length;i++){try{Object.defineProperty(w,N[i],{value:undefined,writable:false,configurable:false,enumerable:false});}catch(e){try{delete w[N[i]];}catch(x){}}}
+try{Object.defineProperty(w,'__orbitNoRtc',{value:1});}catch(e){}}catch(e){}}
+off(window);
+function sweep(){try{for(var i=0;i<window.frames.length;i++){try{off(window.frames[i]);}catch(e){}}}catch(e){}}
+function wrap(o,k){try{var f=o[k];if(typeof f!=='function')return;o[k]=new Proxy(f,{apply:function(t,s,a){var r=Reflect.apply(t,s,a);sweep();return r;}});}catch(e){}}
+['appendChild','insertBefore','replaceChild'].forEach(function(k){wrap(Node.prototype,k);});
+['append','prepend','after','before','replaceWith','insertAdjacentElement','insertAdjacentHTML','replaceChildren','setHTMLUnsafe'].forEach(function(k){wrap(Element.prototype,k);});
+['write','writeln','append','prepend'].forEach(function(k){wrap(Document.prototype,k);});
+try{wrap(Range.prototype,'insertNode');}catch(e){}
+function hook(C,p,view){try{var d=Object.getOwnPropertyDescriptor(C.prototype,p);if(!d||!d.get)return;var g=d.get;
+Object.defineProperty(C.prototype,p,{configurable:true,enumerable:d.enumerable,get:function(){var r=g.call(this);try{off(view?(r&&r.defaultView):r);}catch(e){}return r;},set:d.set});}catch(e){}}
+[window.HTMLIFrameElement,window.HTMLFrameElement,window.HTMLObjectElement,window.HTMLEmbedElement].forEach(function(C){if(!C)return;hook(C,'contentWindow',false);hook(C,'contentDocument',true);});
+[Element,window.ShadowRoot].forEach(function(C){if(!C)return;['innerHTML','outerHTML'].forEach(function(p){try{var d=Object.getOwnPropertyDescriptor(C.prototype,p);if(!d||!d.set)return;var s=d.set;
+Object.defineProperty(C.prototype,p,{configurable:true,enumerable:d.enumerable,get:d.get,set:function(v){s.call(this,v);sweep();}});}catch(e){}});});
+})();"""
+
     /** evaluateJavascript returns a JSON-encoded value; unwrap a string result. */
     fun unwrap(result: String?): String {
         if (result.isNullOrEmpty() || result == "null") return ""

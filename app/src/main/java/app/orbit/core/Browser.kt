@@ -25,6 +25,7 @@ import android.webkit.SslErrorHandler
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -186,6 +187,11 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
 
     fun load() {
         Images.init(activity)
+        // Before any WebView loads: with Orbit VPN on, nothing may go out until it's connected.
+        Vpn.onRouteReady = ::flushPendingLoads
+        Vpn.onRouteChanged = ::afterRouteChange
+        Vpn.init(activity, scope)
+        Shields.init(activity, scope)
         MediaCenter.onCommand = ::mediaCommand
         root.readObject("profiles")?.let { o ->
             o.optJSONArray("list")?.let { a -> for (i in 0 until a.length()) profiles += UserProfile.fromJson(a.getJSONObject(i)) }
@@ -303,6 +309,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         settings = s
         store.write("settings") { s.toJson().toString() }
         tabs.forEach { t -> t.webView?.let { applyWebSettings(it, t) } }
+        syncAllScripts()
         changed()
     }
 
@@ -332,6 +339,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     fun onResume() {
         foreground = true
         Updates.onResume(scope)
+        Shields.updateIfDue(scope)
         current?.let { it.lastActive = System.currentTimeMillis(); it.webView?.onResume() }
         tick()
     }
@@ -776,12 +784,69 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
             t.flowBlocked = url
             return
         }
+        val target = linkFor(url)?.also { if (it.startsWith("https://") && url.startsWith("http://")) t.upgradedHost = Url.host(it) } ?: url
         t.showHome = false
-        t.url = url
-        t.pageHost = Url.host(url)
+        t.url = target
+        t.pageHost = Url.host(target)
         val wv = ensureWebView(t, loadInitial = false)
-        wv.loadUrl(url)
+        loadIn(t, wv, target)
         barCollapsed = false
+    }
+
+    /** Plain-http sites the user chose to open without https while Orbit VPN is on (this session). */
+    private val httpAllowed = HashSet<String>()
+
+    /**
+     * What a main-frame [url] should become, or null if it's fine: without tracking parameters
+     * (Shields), and over https while Orbit VPN is on, since a relay could read or change plain
+     * http. Onion sites, local addresses and sites allowed by the user stay as they are.
+     */
+    private fun linkFor(url: String): String? {
+        var out = url
+        if (Vpn.enabled && out.startsWith("http://")) {
+            val host = Url.host(out)
+            val local = host == null || host == "localhost" || host.endsWith(".onion") || host.contains(':') ||
+                host.all { it.isDigit() || it == '.' } || host in httpAllowed
+            if (!local) out = "https://" + out.removePrefix("http://")
+        }
+        val site = Url.host(out)?.let(Url::site)
+        if (settings.shields && settings.cleanLinks && (site == null || site !in shieldsOff)) Shields.cleanUrl(out)?.let { out = it }
+        return out.takeIf { it != url }
+    }
+
+    /** The https version of [host] failed: offer the page over plain http, as the user's choice. */
+    private fun offerHttp(tab: Tab, host: String, url: String) {
+        tab.upgradedHost = null
+        val plain = "http://" + url.substringAfter("://")
+        notify("$host has no secure version", "Open anyway") {
+            httpAllowed += host
+            navigate(plain, tab)
+        }
+    }
+
+    /** Loads [url], unless Orbit VPN's route isn't in place yet; then it waits for it. */
+    private fun loadIn(tab: Tab, wv: WebView, url: String) {
+        if (Vpn.routeReady) wv.loadUrl(url) else tab.pendingUrl = url
+    }
+
+    private fun flushPendingLoads() {
+        (tabs + listOfNotNull(peek)).forEach { t ->
+            val wv = t.webView ?: return@forEach
+            val url = t.pendingUrl ?: return@forEach
+            t.pendingUrl = null
+            if (url == RESTORE) {
+                val state = t.savedState
+                t.savedState = null
+                val restored = state?.let { runCatching { wv.restoreState(it) }.getOrNull() }
+                if (restored == null && t.url.isNotBlank()) wv.loadUrl(t.url)
+            } else wv.loadUrl(url)
+        }
+    }
+
+    /** Orbit VPN switched route: pages reload so they use the new one (and nothing keeps the old). */
+    private fun afterRouteChange() {
+        syncAllScripts()
+        (tabs + listOfNotNull(peek)).forEach { t -> if (!t.showHome && t.pendingUrl == null) t.webView?.reload() }
     }
 
     fun goBack(tab: Tab? = current): Boolean {
@@ -884,6 +949,10 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         tabs.filter { it.pageHost?.let(Url::site) == site }.forEach { injectPageStyles(it) }
     }
 
+    /** The filter lists in use for [site], as [Shields] bits (0 = Shields off there). */
+    fun shieldLists(site: String?): Int =
+        if (!settings.shields || (site != null && site in shieldsOff)) 0 else Shields.lists(settings)
+
     fun shieldsOn(tab: Tab?): Boolean {
         val site = tab?.pageHost?.let(Url::site) ?: return settings.shields
         return settings.shields && site !in shieldsOff
@@ -894,6 +963,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         if (site in shieldsOff) shieldsOff.remove(site) else shieldsOff.add(site)
         saveStats()
         changed()
+        syncAllScripts()
         tab.webView?.reload()
     }
 
@@ -1104,10 +1174,8 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
             val q = URLEncoder.encode(query, "UTF-8")
             val endpoint = if (settings.engine == SearchEngine.GOOGLE) "https://suggestqueries.google.com/complete/search?client=firefox&ie=UTF-8&oe=UTF-8&q=$q"
             else "https://ac.duckduckgo.com/ac/?q=$q&type=list"
-            val conn = URL(endpoint).openConnection() as HttpURLConnection
+            val conn = Net.open(endpoint, connectMs = 3000, readMs = 3000)
             conn.useCaches = false
-            conn.connectTimeout = 3000
-            conn.readTimeout = 3000
             val text = conn.inputStream.bufferedReader().use { it.readText() }
             val arr = JSONArray(text)
             if (arr.length() > 1 && arr.opt(1) is JSONArray) {
@@ -1141,6 +1209,9 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         if (tab.id == mediaTabId) stopMedia()
         val wv = tab.webView ?: return
         tab.webView = null
+        tab.youtubeScript = null
+        tab.noRtcScript = null
+        if (tab.pendingUrl == RESTORE) tab.pendingUrl = null
         (wv.parent as? ViewGroup)?.removeView(wv)
         runCatching {
             wv.stopLoading()
@@ -1154,6 +1225,12 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         val wv = createWebView(tab)
         tab.painted = false
         tab.webView = wv
+        if (!Vpn.routeReady) {
+            // Restored or loaded once Orbit VPN's route is in place (see flushPendingLoads).
+            if (tab.savedState != null) tab.pendingUrl = RESTORE
+            else if (loadInitial && tab.url.isNotBlank()) tab.pendingUrl = tab.url
+            return wv
+        }
         val restored = tab.savedState?.let { runCatching { wv.restoreState(it) }.getOrNull() }
         tab.savedState = null
         if (restored == null && loadInitial && tab.url.isNotBlank()) wv.loadUrl(tab.url)
@@ -1181,7 +1258,13 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     private fun injectPageStyles(tab: Tab) {
         val wv = tab.webView ?: return
         val site = tab.pageHost?.let(Url::site)
-        if (settings.hideCookieBanners && shieldsOn(tab)) wv.evaluateJavascript(Scripts.style("orbit-cookie", Shields.cookieCss), null)
+        // Without the Shields channel (old WebView), the page's own rules are applied from here.
+        if (!shieldsChannel) {
+            val host = tab.pageHost
+            val lists = shieldLists(site)
+            val css = if (host != null && lists != 0) Shields.pageCss(host, lists, tab.shieldFlags) else ""
+            wv.evaluateJavascript(Scripts.style("orbit-shields", css), null)
+        }
         val z = site?.let { zaps[it] }.orEmpty()
         wv.evaluateJavascript(Scripts.style("orbit-zap", Scripts.zapCss(z)), null)
         if (tab.zapMode) wv.evaluateJavascript(Scripts.ZAP_ON, null)
@@ -1219,8 +1302,12 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         saveHistory()
     }
 
-    private fun download(tab: Tab, url: String, ua: String?, disposition: String?, mime: String?) {
+    private fun download(tab: Tab, url: String, ua: String?, disposition: String?, mime: String?, confirmed: Boolean = false) {
         if (!url.startsWith("http")) return notify("Can't download this file")
+        // Android's download manager is a separate app: it can't go through Orbit VPN.
+        if (Vpn.enabled && !confirmed) {
+            return notify("Downloads don't go through Orbit VPN", "Download") { download(tab, url, ua, disposition, mime, confirmed = true) }
+        }
         runCatching {
             val name = URLUtil.guessFileName(url, disposition, mime)
             val req = DownloadManager.Request(Uri.parse(url)).apply {
@@ -1269,6 +1356,74 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
             if (docStartScripts) WebViewCompat.addDocumentStartJavaScript(wv, Scripts.MEDIA, setOf("*"))
         }
     }
+
+    private val shieldsChannel = docStartScripts &&
+        runCatching { WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) }.getOrDefault(false)
+
+    /**
+     * Element hiding (see [Scripts.SHIELDS]). Any frame may ask, for its own origin; it only ever
+     * gets CSS built from the filter lists, so a page that misuses this learns nothing new.
+     */
+    private fun installShields(wv: WebView, tab: Tab) {
+        if (!shieldsChannel) return
+        runCatching {
+            WebViewCompat.addWebMessageListener(wv, "OrbitShields", setOf("*")) { _, message, sourceOrigin, _, reply ->
+                val data = message.data ?: return@addWebMessageListener
+                if (data.length > 200_000) return@addWebMessageListener
+                val scheme = sourceOrigin.scheme
+                val host = sourceOrigin.host?.lowercase()
+                if (host == null || (scheme != "https" && scheme != "http")) return@addWebMessageListener
+                // Rules follow the page in the tab, so a site's own switch covers its frames too.
+                val lists = shieldLists(tab.pageHost?.let(Url::site) ?: Url.site(host))
+                val o = runCatching { JSONObject(data) }.getOrNull() ?: return@addWebMessageListener
+                when (o.optString("t")) {
+                    "init" -> {
+                        if (lists == 0) {
+                            reply.postMessage("{}")
+                            return@addWebMessageListener
+                        }
+                        val flags = Shields.pageFlags("$scheme://$host/", lists)
+                        val hide = flags and (RType.DOCUMENT or RType.ELEMHIDE) == 0
+                        val reply2 = JSONObject()
+                            .put("css", Shields.pageCss(host, lists, flags))
+                            .put("scan", hide && flags and RType.GENERICHIDE == 0)
+                        reply.postMessage(reply2.toString())
+                    }
+                    "scan" -> {
+                        if (lists == 0) return@addWebMessageListener
+                        fun names(key: String): List<String> {
+                            val a = o.optJSONArray(key) ?: return emptyList()
+                            return List(minOf(a.length(), 2000)) { a.optString(it) }.filter { it.length in 1..200 }
+                        }
+                        val css = Shields.namesCss(host, names("c"), names("i"), lists)
+                        if (css.isNotEmpty()) reply.postMessage("+$css")
+                    }
+                }
+            }
+            WebViewCompat.addDocumentStartJavaScript(wv, Scripts.SHIELDS, setOf("*"))
+        }
+    }
+
+    /** Adds or removes the document-start scripts that depend on settings, for pages loaded from now on. */
+    private fun syncScripts(tab: Tab) {
+        val wv = tab.webView ?: return
+        if (!docStartScripts) return
+        val youtube = shieldLists("youtube.com") and Shields.ADS != 0
+        if (youtube && tab.youtubeScript == null) {
+            tab.youtubeScript = runCatching { WebViewCompat.addDocumentStartJavaScript(wv, Scripts.YOUTUBE, YOUTUBE_ORIGINS) }.getOrNull()
+        } else if (!youtube) {
+            tab.youtubeScript?.let { runCatching { it.remove() } }
+            tab.youtubeScript = null
+        }
+        if (Vpn.enabled && tab.noRtcScript == null) {
+            tab.noRtcScript = runCatching { WebViewCompat.addDocumentStartJavaScript(wv, Scripts.NO_WEBRTC, setOf("*")) }.getOrNull()
+        } else if (!Vpn.enabled) {
+            tab.noRtcScript?.let { runCatching { it.remove() } }
+            tab.noRtcScript = null
+        }
+    }
+
+    private fun syncAllScripts() = (tabs + listOfNotNull(peek)).forEach(::syncScripts)
 
     /** True if this tab should keep running while Orbit is in the background. */
     fun keepsPlaying(tab: Tab) = settings.backgroundPlay && mediaPlaying && tab.id == mediaTabId
@@ -1373,9 +1528,10 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         applyWebSettings(wv, tab)
         installBridge(wv, tab)
         installMediaBridge(wv, tab)
-        if (docStartScripts && settings.hideCookieBanners) {
-            runCatching { WebViewCompat.addDocumentStartJavaScript(wv, Scripts.style("orbit-cookie", Shields.cookieCss), setOf("*")) }
-        }
+        installShields(wv, tab)
+        // Registered on the WebView object, so it exists from here on.
+        tab.webView = wv
+        syncScripts(tab)
 
         wv.setFindListener { active, total, done ->
             if (done && tab.id == currentId) { findCurrent = if (total == 0) 0 else active + 1; findTotal = total }
@@ -1417,6 +1573,22 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url.toString()
                 val scheme = request.url.scheme?.lowercase()
+                if (request.isForMainFrame && (scheme == "http" || scheme == "https") && request.method.equals("GET", ignoreCase = true)) {
+                    val host = request.url.host?.lowercase()
+                    // A site that sends its https page back to http has no secure version.
+                    if (scheme == "http" && request.isRedirect && host != null && host == tab.upgradedHost) {
+                        offerHttp(tab, host, url)
+                        return true
+                    }
+                    val target = linkFor(url)
+                    // A site that adds a removed parameter back gets its way, rather than a loop.
+                    if (target != null && !(request.isRedirect && target == tab.cleanedUrl)) {
+                        if (target.startsWith("https://") && scheme == "http") tab.upgradedHost = host
+                        tab.cleanedUrl = target
+                        view.loadUrl(target)
+                        return true
+                    }
+                }
                 if (scheme !in setOf("http", "https", "about", "data", "blob", "javascript")) {
                     if (scheme == "file" || scheme == "content") return true
                     // Other apps only open from a tap; anything else has to be confirmed.
@@ -1438,9 +1610,10 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
 
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 if (request.isForMainFrame || !settings.shields) return null
-                val pageSite = tab.pageHost?.let(Url::site)
-                if (pageSite != null && pageSite in shieldsOff) return null
-                val res = Shields.intercept(request.url, tab.pageHost)
+                val pageHost = tab.pageHost
+                val lists = shieldLists(pageHost?.let(Url::site))
+                if (lists == 0) return null
+                val res = Shields.intercept(request, pageHost, lists, tab.shieldFlags)
                 if (res != null) main.post { tab.blockedCount++; totalBlocked++; saveStats() }
                 return res
             }
@@ -1450,6 +1623,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
                 if (newHost == null || tab.pageHost == null || Url.site(newHost) != Url.site(tab.pageHost!!)) tab.favicon = null
                 tab.url = url
                 tab.pageHost = Url.host(url)
+                tab.shieldFlags = Shields.pageFlags(url, shieldLists(tab.pageHost?.let(Url::site)))
                 tab.loading = true
                 tab.blockedCount = 0
                 tab.zapMode = false
@@ -1487,7 +1661,16 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
 
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                 handler.cancel()
-                notify("Connection to ${Url.pretty(error.url)} isn't secure")
+                val host = Url.host(error.url)
+                if (host != null && host == tab.upgradedHost) offerHttp(tab, host, error.url)
+                else notify("Connection to ${Url.pretty(error.url)} isn't secure")
+            }
+
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                val host = request.url.host?.lowercase() ?: return
+                if (request.isForMainFrame && request.url.scheme == "https" && host == tab.upgradedHost) {
+                    offerHttp(tab, host, request.url.toString())
+                }
             }
         }
 
@@ -1565,6 +1748,13 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     }
 
     companion object {
+        /** [Tab.pendingUrl] for a tab whose saved state is restored once the route is ready. */
+        private const val RESTORE = "orbit:restore"
+
+        private val YOUTUBE_ORIGINS = setOf(
+            "https://www.youtube.com", "https://m.youtube.com", "https://music.youtube.com", "https://youtube.com",
+        )
+
         /** How much history is backed up to Google. */
         private const val SYNCED_HISTORY = 500
 

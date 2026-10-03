@@ -87,12 +87,19 @@ import app.orbit.core.SearchEngine
 import app.orbit.core.Settings
 import app.orbit.core.Space
 import app.orbit.core.Tab
+import app.orbit.core.Shields
 import app.orbit.core.Url
+import app.orbit.core.Vpn
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.FilterList
+import androidx.compose.material.icons.outlined.Fingerprint
+import androidx.compose.material.icons.outlined.LinkOff
+import androidx.compose.material.icons.outlined.VpnLock
 import app.orbit.core.UserProfile
 import java.text.DateFormat
 import java.util.Date
 
-enum class SheetKind { Menu, Shields, Spaces, Flow, Settings, Trail, Profiles, QuickAdd, Customize, Update }
+enum class SheetKind { Menu, Shields, Vpn, Spaces, Flow, Settings, Trail, Profiles, QuickAdd, Customize, Update }
 
 private val Flat = RoundedCornerShape(0.dp)
 
@@ -136,6 +143,7 @@ fun PageMenu(tab: Tab?, open: (SheetKind) -> Unit, onDismiss: () -> Unit) {
                 Icons.Outlined.Shield, "Shields", enabled = page,
                 meta = if (!page) null else if (browser.shieldsOn(tab)) "${tab?.blockedCount ?: 0} blocked" else "Off",
             ) { act { open(SheetKind.Shields) } }
+            MenuRow(Icons.Outlined.VpnLock, "Orbit VPN", meta = vpnMeta()) { act { open(SheetKind.Vpn) } }
             MenuRow(
                 Icons.Outlined.Timer, "Focus",
                 meta = if (browser.flowActive) "until " + DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(browser.flowUntil)) else null,
@@ -182,47 +190,95 @@ private fun MenuRow(
 @Composable
 fun ShieldsSheet(tab: Tab?, onDismiss: () -> Unit) {
     val browser = LocalBrowser.current
-    val site = tab?.pageHost?.let(Url::site)
+    val scope = rememberCoroutineScope()
+    val site = tab?.pageHost?.takeIf { tab.showHome.not() }?.let(Url::site)
     val on = browser.shieldsOn(tab)
+    val s = browser.settings
+    fun set(n: Settings) {
+        browser.updateSettings(n)
+        if (tab != null && !tab.showHome) browser.reload(tab)
+    }
     OrbSheet(onDismiss) {
-        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 8.dp)) {
-            Text("Shields", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                when {
-                    site == null -> "${formatCount(browser.totalBlocked)} trackers blocked so far"
-                    !on -> "Off for $site"
-                    else -> "${tab?.blockedCount ?: 0} trackers blocked on $site"
-                },
-                style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = TNUM), color = Orb.Text2,
-            )
-        }
-        if (tab != null && site != null) {
-            ToggleRow("Block trackers on this site", null, site !in browser.shieldsOff, Icons.Outlined.Shield) {
-                browser.toggleSiteShields(tab)
+        Column(Modifier.heightIn(max = 680.dp).verticalScroll(rememberScrollState())) {
+            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 8.dp)) {
+                Text("Shields", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    when {
+                        !s.shields -> "Off everywhere"
+                        site == null -> "${formatCount(browser.totalBlocked)} ads and trackers blocked so far"
+                        !on -> "Off for $site"
+                        else -> "${tab?.blockedCount ?: 0} ads and trackers blocked on $site"
+                    },
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = TNUM), color = Orb.Text2,
+                )
             }
-        }
-        ToggleRow("Hide cookie banners", null, browser.settings.hideCookieBanners, Icons.Outlined.Cookie) {
-            browser.updateSettings(browser.settings.copy(hideCookieBanners = it))
-        }
-        val hidden = site?.let { browser.zaps[it] }.orEmpty()
-        if (hidden.isNotEmpty()) {
-            Heading("Hidden on this site")
-            hidden.forEach { sel ->
-                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(sel, style = MonoSmall, color = Orb.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    IconButton(Icons.Outlined.Close, "Show again", tint = Orb.Text2, size = 40.dp) { browser.removeZap(site!!, sel) }
+            if (tab != null && site != null && s.shields) {
+                ToggleRow("Shields on this site", "Turn off if $site doesn't work properly", site !in browser.shieldsOff, Icons.Outlined.Shield) {
+                    browser.toggleSiteShields(tab)
                 }
             }
-        }
-        if (tab != null && !tab.showHome) {
-            SecondaryButton(
-                if (tab.zapMode) "Stop hiding elements" else "Hide elements on this page",
-                Modifier.padding(horizontal = 16.dp, vertical = 16.dp).fillMaxWidth(),
-                icon = Icons.Outlined.WebAssetOff,
-            ) { onDismiss(); browser.toggleZap(tab) }
+            Heading("Everywhere")
+            ToggleRow("Shields", null, s.shields, Icons.Outlined.Shield) { set(s.copy(shields = it)) }
+            if (s.shields) {
+                ToggleRow("Block ads", "Including YouTube ads", s.blockAds, Icons.Outlined.Block) { set(s.copy(blockAds = it)) }
+                ToggleRow("Block trackers", "Analytics, tracking pixels, third-party cookies", s.blockTrackers, Icons.Outlined.Fingerprint) {
+                    set(s.copy(blockTrackers = it))
+                }
+                ToggleRow("Hide cookie banners", "Hidden, never accepted", s.hideCookieBanners, Icons.Outlined.Cookie) {
+                    set(s.copy(hideCookieBanners = it))
+                }
+                ToggleRow("Remove tracking from links", "utm_, fbclid, gclid and others", s.cleanLinks, Icons.Outlined.LinkOff) {
+                    browser.updateSettings(s.copy(cleanLinks = it))
+                }
+            }
+            FilterListsRow(scope)
+            val hidden = site?.let { browser.zaps[it] }.orEmpty()
+            if (hidden.isNotEmpty()) {
+                Heading("Hidden on this site")
+                hidden.forEach { sel ->
+                    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(sel, style = MonoSmall, color = Orb.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        IconButton(Icons.Outlined.Close, "Show again", tint = Orb.Text2, size = 40.dp) { browser.removeZap(site!!, sel) }
+                    }
+                }
+            }
+            if (tab != null && !tab.showHome) {
+                SecondaryButton(
+                    if (tab.zapMode) "Stop hiding elements" else "Hide elements on this page",
+                    Modifier.padding(horizontal = 16.dp, vertical = 16.dp).fillMaxWidth(),
+                    icon = Icons.Outlined.WebAssetOff,
+                ) { onDismiss(); browser.toggleZap(tab) }
+            }
         }
     }
+}
+
+/** The filter lists: how many rules, when they were checked, and a way to check now. */
+@Composable
+private fun FilterListsRow(scope: kotlinx.coroutines.CoroutineScope) {
+    val browser = LocalBrowser.current
+    val checked = Shields.checkedAt
+    ListRow(
+        "Filter lists",
+        subtitle = when {
+            Shields.updating -> "Updating"
+            Shields.error != null -> Shields.error
+            checked == 0L -> "Built-in list · downloading EasyList"
+            else -> "${formatCount(Shields.rules.toLong())} rules · checked ${ago(System.currentTimeMillis() - checked).let { if (it == "now") "just now" else "$it ago" }}"
+        },
+        icon = Icons.Outlined.FilterList,
+        trailingText = if (Shields.updating) null else "Update",
+    ) {
+        Shields.update(scope) { ok -> browser.notify(if (ok) "Filter lists are up to date" else Shields.error ?: "Couldn't update the filter lists") }
+    }
+}
+
+private fun vpnMeta(): String = when (Vpn.state) {
+    Vpn.State.OFF -> "Off"
+    Vpn.State.CONNECTING -> "${Vpn.progress}%"
+    Vpn.State.ON -> "On"
+    Vpn.State.FAILED -> "Not connected"
 }
 
 // =============================================================================================
@@ -614,7 +670,7 @@ fun FlowSheet(onDismiss: () -> Unit) {
 // =============================================================================================
 
 @Composable
-fun SettingsSheet(onCustomize: () -> Unit, onUpdate: () -> Unit, onDismiss: () -> Unit) {
+fun SettingsSheet(onCustomize: () -> Unit, onUpdate: () -> Unit, onShields: () -> Unit, onVpn: () -> Unit, onDismiss: () -> Unit) {
     val browser = LocalBrowser.current
     val context = LocalContext.current
     val s = browser.settings
@@ -644,8 +700,14 @@ fun SettingsSheet(onCustomize: () -> Unit, onUpdate: () -> Unit, onDismiss: () -
             }
             ToggleRow("Show search suggestions", null, s.suggestions, Icons.Outlined.Search) { set(s.copy(suggestions = it)) }
             Heading("Privacy")
-            ToggleRow("Block trackers", null, s.shields, Icons.Outlined.Shield) { set(s.copy(shields = it)) }
-            ToggleRow("Hide cookie banners", null, s.hideCookieBanners, Icons.Outlined.Cookie) { set(s.copy(hideCookieBanners = it)) }
+            ListRow(
+                "Shields",
+                subtitle = if (!s.shields) "Off" else listOfNotNull(
+                    "ads".takeIf { s.blockAds }, "trackers".takeIf { s.blockTrackers }, "cookie banners".takeIf { s.hideCookieBanners },
+                ).joinToString(", ").ifEmpty { "Nothing blocked" }.replaceFirstChar { it.uppercase() },
+                icon = Icons.Outlined.Shield,
+            ) { onShields() }
+            ListRow("Orbit VPN", subtitle = vpnMeta(), icon = Icons.Outlined.VpnLock) { onVpn() }
             Text(
                 "Close ghost tabs after",
                 style = MaterialTheme.typography.titleSmall,
@@ -805,6 +867,13 @@ private val Components = listOf(
     Component("Material Icons", "Google LLC", "Apache License 2.0", "Apache-2.0.txt"),
     Component("Kotlin standard library, kotlinx.coroutines", "JetBrains s.r.o. and contributors", "Apache License 2.0", "Apache-2.0.txt"),
     Component("Geist and Geist Mono fonts", "The Geist Project Authors", "SIL Open Font License 1.1", "OFL-1.1.txt"),
+    Component("Tor and tor-android (Orbit VPN)", "The Tor Project, Inc.; Guardian Project", "BSD 3-Clause License", "Tor-BSD-3-Clause.txt"),
+    Component("jtorctl", "The Tor Project, Inc.; Guardian Project", "BSD 3-Clause License", "jtorctl-BSD-3-Clause.txt"),
+    Component("OpenSSL (in Tor)", "The OpenSSL Project Authors", "Apache License 2.0", "Apache-2.0.txt"),
+    Component("libevent (in Tor)", "Niels Provos, Nick Mathewson and contributors", "BSD 3-Clause License", "libevent-BSD-3-Clause.txt"),
+    Component("zlib (in Tor)", "Jean-loup Gailly and Mark Adler", "zlib License", "zlib.txt"),
+    Component("Zstandard (in Tor)", "Meta Platforms, Inc. and affiliates", "BSD 3-Clause License", "zstd-BSD-3-Clause.txt"),
+    Component("AndroidX LocalBroadcastManager", "The Android Open Source Project", "Apache License 2.0", "Apache-2.0.txt"),
 )
 
 @Composable

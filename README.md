@@ -47,7 +47,8 @@ Release signing certificate SHA-256:
 | **Ghost tabs** | Private tabs with their own cookie jar that close themselves after 5–60 minutes in the background. They're kept out of screenshots and the recent-apps preview. |
 | **Preview** | Long-press a link and choose Preview to open it in a card. Swipe up to keep it as a tab (no reload). |
 | **Focus** | Block distracting sites for 15–90 minutes, with an "open anyway for 5 min" escape hatch. |
-| **Shields** | On-device tracker and ad blocking (third-party only), third-party cookie blocking, cookie-banner hiding, and a per-site switch. |
+| **Shields** | A full ad and tracker blocker, on the device. Uses EasyList (ads), EasyPrivacy (trackers) and the EasyList Cookie List, downloaded from their publishers and updated every few days: network blocking with the lists' options and exceptions, element hiding (including on content added later), YouTube ad removal, third-party cookie blocking, removal of tracking parameters (`utm_`, `fbclid`, `gclid`…) from links, and Global Privacy Control. Each part can be switched off, and so can Shields for a single site. |
+| **Orbit VPN** | Free, built in, no account: hides your IP address by routing everything Orbit loads through the Tor network, using a Tor client inside the app. If it disconnects, pages stop loading instead of going out without it. While it's on, WebRTC is off and http sites are opened over https. Only Orbit's own traffic is covered. |
 | **Hide elements** | Tap any part of a page to hide it on that site for good. You can undo it from Shields. |
 | **Reader view** | Articles with Dark / Paper / Light themes, serif or sans, adjustable size. |
 | **Tab history** | Every page the current tab has visited. Tap one to jump back. |
@@ -77,7 +78,9 @@ In short: everything stays on the device, nothing is backed up, and the app has 
   plus the Geist fonts (SIL OFL 1.1). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); the
   license texts are also in the app under *Settings → About → Open-source licenses*.
 - **Content blocking:** Shields and "Hide elements" only change how pages are displayed on your
-  own device, at your request. The blocklist is an original, hand-curated list. Hiding a cookie
+  own device, at your request. The filter lists (EasyList, EasyPrivacy, EasyList Cookie List) are
+  not shipped with the app: Orbit downloads them from their publishers on your device, and they
+  stay under their own licenses. The small built-in list is original. Hiding a cookie
   banner never clicks "accept": no consent is given on your behalf.
 - **Trademarks:** website names and icons shown in the app belong to their owners and are only
   used to identify the sites you visit. Orbit isn't affiliated with any of them.
@@ -121,7 +124,10 @@ app/src/main/java/app/orbit/
   core/Browser.kt        engine: tabs, spaces/profiles, WebView wiring and policy, focus, ghosts
   core/Tab.kt            observable tab state
   core/Scripts.kt        injected JS (theme colour, reader extraction, hide elements, CSP-safe styles)
-  core/Shields.kt        blocklist + cookie-banner CSS
+  core/Filters.kt        filter engine for Adblock Plus syntax (network + element hiding)
+  core/Shields.kt        filter lists (download, update), request blocking, link cleaning
+  core/Vpn.kt            Orbit VPN: in-app Tor client, WebView proxy, fail-closed route; Net
+  ui/Vpn.kt              the Orbit VPN sheet and connecting screen
   core/Url.kt            address resolution, !bangs, site names from titles
   core/Images.kt         favicon cache and fetching
   core/Store.kt          debounced JSON persistence
@@ -144,7 +150,11 @@ tools/logo.py            regenerates the logo, launcher icon and in-app mark
 
 ## Known limits
 
-- The blocklist is a curated list (~200 domains), not full EasyList.
+- Shields doesn't run scriptlets (rules that inject code into pages), so a few anti-adblock
+  walls that need them aren't handled. YouTube ad removal may need updates when YouTube changes.
+- Orbit VPN uses Tor: slower than a commercial VPN, some sites block or challenge Tor, and you
+  can't choose a country. Downloads go through Android's download manager, outside the VPN
+  (Orbit asks first). It doesn't support Tor bridges for networks that block Tor.
 - Site permission prompts (camera, mic, location) are denied.
 - `blob:` downloads aren't supported yet.
 - Without WebView 121+, spaces and ghost tabs share one cookie jar (the app says so).
