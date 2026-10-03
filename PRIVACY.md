@@ -14,6 +14,8 @@ backup and device-to-device transfer:
 - Open tabs (so they can be restored), browsing history, favorites and spaces
 - Settings, the elements you hid on sites, tracker-blocking counts, and whether Orbit VPN is on
 - The downloaded filter lists, and Tor's network directory (so Orbit VPN connects faster next time)
+- If you add Orbit's home-screen widgets: the active profile's favorite sites (address and name)
+  and whether Orbit VPN is on, so the widgets can show them. Favorites appear on your home screen.
 - Cached site icons
 - Cookies and site data, managed by Android System WebView
 

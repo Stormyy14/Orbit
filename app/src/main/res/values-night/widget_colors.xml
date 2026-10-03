@@ -1,0 +1,8 @@
+<resources>
+    <color name="widget_bg">#FF111111</color>
+    <color name="widget_field">#FF1A1A1A</color>
+    <color name="widget_border">#FF242424</color>
+    <color name="widget_text">#FFEDEDED</color>
+    <color name="widget_text2">#FFA1A1A1</color>
+    <color name="widget_ghost">#FFB38CE6</color>
+</resources>

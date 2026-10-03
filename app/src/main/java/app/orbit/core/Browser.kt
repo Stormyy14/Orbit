@@ -40,6 +40,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -209,6 +210,12 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
             }
         }
         syncNow()
+        // Widgets show the active profile's favorites and whether Orbit VPN is on.
+        scope.launch {
+            snapshotFlow { pins.toList() to Vpn.enabled }.collect { (p, vpn) ->
+                withContext(Dispatchers.IO) { runCatching { Widgets.publish(activity, p, vpn) } }
+            }
+        }
         Updates.init(activity)
         Updates.checkIfDue(scope)
     }
@@ -1113,12 +1120,16 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     // Intents
     // =====================================================================================
 
+    /** Something a home-screen widget asked for; the UI carries it out and clears it. */
+    var launch by mutableStateOf<Launch?>(null)
+
     /** Bumped whenever another app hands us a link, so the UI can close what's in the way. */
     var externalOpens by mutableIntStateOf(0)
         private set
 
     fun handleIntent(intent: Intent?) {
         intent ?: return
+        Widgets.launchFor(intent)?.let { launch = it; return }
         if (intent.action == MediaCenter.ACTION_OPEN) {
             intent.getStringExtra(MediaCenter.EXTRA_TAB)?.let { id -> tabs.firstOrNull { it.id == id }?.let(::select) }
             return
@@ -1131,9 +1142,14 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         }
     }
 
-    private fun openFromOutside(input: String) {
+    /** The current tab if it's an empty start page, else a new tab. */
+    fun blankTab(): Tab {
         val cur = current
-        val t = if (cur != null && cur.showHome && !cur.ghost && cur.webView == null) cur else newTab()
+        return if (cur != null && cur.showHome && !cur.ghost && cur.webView == null) cur.also(::select) else newTab()
+    }
+
+    private fun openFromOutside(input: String) {
+        val t = blankTab()
         val resolved = Url.resolve(input, settings.engine)
         // Other apps may only hand us web pages; anything else becomes a search.
         navigate(if (resolved.startsWith("https://") || resolved.startsWith("http://")) resolved else Url.search(input, settings.engine), t)

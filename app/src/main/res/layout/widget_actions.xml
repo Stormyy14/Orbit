@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Quick actions widget: four buttons. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:gravity="center"
+    android:orientation="horizontal"
+    android:padding="6dp">
+
+    <LinearLayout
+        android:id="@+id/action_new"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <ImageView
+            android:id="@+id/action_new_icon"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/widget_circle"
+            android:importantForAccessibility="no"
+            android:padding="9dp"
+            android:src="@drawable/wi_add" />
+
+        <TextView
+            android:id="@+id/action_new_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/widget_new_tab"
+            android:textColor="@color/widget_text"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/action_ghost"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <ImageView
+            android:id="@+id/action_ghost_icon"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/widget_circle"
+            android:importantForAccessibility="no"
+            android:padding="9dp"
+            android:src="@drawable/wi_ghost" />
+
+        <TextView
+            android:id="@+id/action_ghost_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/widget_ghost"
+            android:textColor="@color/widget_text"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/action_vpn"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <ImageView
+            android:id="@+id/action_vpn_icon"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/widget_circle"
+            android:importantForAccessibility="no"
+            android:padding="9dp"
+            android:src="@drawable/wi_vpn" />
+
+        <TextView
+            android:id="@+id/action_vpn_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/widget_vpn"
+            android:textColor="@color/widget_text"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/action_focus"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <ImageView
+            android:id="@+id/action_focus_icon"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/widget_circle"
+            android:importantForAccessibility="no"
+            android:padding="9dp"
+            android:src="@drawable/wi_focus" />
+
+        <TextView
+            android:id="@+id/action_focus_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/widget_focus"
+            android:textColor="@color/widget_text"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+</LinearLayout>

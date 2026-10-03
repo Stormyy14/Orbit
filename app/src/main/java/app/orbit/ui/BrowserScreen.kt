@@ -3,6 +3,7 @@ package app.orbit.ui
 import androidx.compose.runtime.rememberCoroutineScope
 import app.orbit.core.Updates
 import app.orbit.core.Vpn
+import app.orbit.core.Launch
 import androidx.compose.material.icons.outlined.VpnLock
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.runtime.key
@@ -87,6 +88,8 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
     val ghost = tab?.ghost == true
     val accent = if (ghost) Orb.Ghost else Orb.Text
     var pulse by remember { mutableStateOf(false) }
+    /** Pulse opens straight into voice input (from the search widget's mic). */
+    var pulseVoice by remember { mutableStateOf(false) }
     var deck by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<SheetKind?>(null) }
     val scope = rememberCoroutineScope()
@@ -96,6 +99,19 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
     }
     val page = tab != null && !tab.showHome
     val barTop = browser.settings.barTop
+    // Home-screen widgets: open search, voice search, a new or ghost tab, Orbit VPN or Focus.
+    LaunchedEffect(browser.launch) {
+        val l = browser.launch ?: return@LaunchedEffect
+        browser.launch = null
+        deck = false; sheet = null; pulse = false; browser.linkMenu = null; browser.reader = null
+        when (l) {
+            Launch.SEARCH, Launch.VOICE -> { browser.blankTab(); pulseVoice = l == Launch.VOICE; pulse = true }
+            Launch.NEW_TAB -> { browser.newTab(); pulseVoice = false; pulse = true }
+            Launch.GHOST -> { browser.newTab(ghost = true); pulseVoice = false; pulse = true }
+            Launch.VPN -> sheet = SheetKind.Vpn
+            Launch.FOCUS -> sheet = SheetKind.Flow
+        }
+    }
     LaunchedEffect(browser.externalOpens) {
         if (browser.externalOpens > 0) { pulse = false; deck = false; sheet = null; browser.linkMenu = null; browser.reader = null }
     }
@@ -287,7 +303,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
                 visible = pulse,
                 enter = fadeIn(tween(120)),
                 exit = fadeOut(tween(100)),
-            ) { Pulse(browser.current, commands) { pulse = false } }
+            ) { Pulse(browser.current, commands, startVoice = pulseVoice) { pulse = false; pulseVoice = false } }
 
             RadialOverlay(radial)
 

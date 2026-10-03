@@ -1,6 +1,8 @@
 package app.orbit.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -85,6 +87,10 @@ fun Deck(onClose: () -> Unit, onSpaces: () -> Unit) {
     val pager = rememberPagerState(initialPage = startPage) { spaces.size + 1 }
 
     LaunchedEffect(Unit) { browser.current?.let(browser::captureThumbnail) }
+    /** The site group being looked at: (page, site). */
+    var openGroup by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    BackHandler(enabled = openGroup != null) { openGroup = null }
+    LaunchedEffect(pager.currentPage) { if (openGroup?.first != pager.currentPage) openGroup = null }
 
     Column(Modifier.fillMaxSize().background(Orb.Bg).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -111,8 +117,21 @@ fun Deck(onClose: () -> Unit, onSpaces: () -> Unit) {
         HorizontalPager(pager, Modifier.weight(1f), beyondViewportPageCount = 1, userScrollEnabled = false) { page ->
             val ghost = page == ghostPage
             val list = if (ghost) browser.ghostTabs else browser.tabsIn(spaces[page].id)
+            val entries = deckEntries(list)
+            // An open group whose tabs have gone back to one (or none) closes by itself.
+            val group = openGroup?.takeIf { it.first == page }?.let { (_, site) ->
+                entries.firstOrNull { it.site == site && it.tabs.size > 1 }
+            }
             if (list.isEmpty()) {
                 EmptyDeck(ghost)
+            } else if (group != null) {
+                SiteGroup(
+                    group,
+                    onBack = { openGroup = null },
+                    onOpen = { t -> haptics.confirm(); browser.select(t); onClose() },
+                    onCloseTab = { t -> haptics.tick(); browser.closeTab(t) },
+                    onCloseAll = { haptics.heavy(); group.tabs.forEach { browser.closeTab(it, undoable = false) }; openGroup = null },
+                )
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
@@ -121,14 +140,25 @@ fun Deck(onClose: () -> Unit, onSpaces: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(list, key = { it.id }) { t ->
-                        TabCard(
-                            t,
-                            current = t.id == browser.currentId,
-                            modifier = Modifier.animateItem(),
-                            onOpen = { haptics.confirm(); browser.select(t); onClose() },
-                            onClose = { haptics.tick(); browser.closeTab(t) },
-                        )
+                    items(entries, key = { it.key }) { e ->
+                        if (e.tabs.size > 1) {
+                            GroupCard(
+                                e,
+                                current = e.tabs.any { it.id == browser.currentId },
+                                modifier = Modifier.animateItem(),
+                                onOpen = { haptics.tick(); openGroup = page to e.site!! },
+                                onCloseAll = { haptics.heavy(); e.tabs.forEach { browser.closeTab(it, undoable = false) } },
+                            )
+                        } else {
+                            val t = e.tabs[0]
+                            TabCard(
+                                t,
+                                current = t.id == browser.currentId,
+                                modifier = Modifier.animateItem(),
+                                onOpen = { haptics.confirm(); browser.select(t); onClose() },
+                                onClose = { haptics.tick(); browser.closeTab(t) },
+                            )
+                        }
                     }
                 }
             }
@@ -160,6 +190,120 @@ fun Deck(onClose: () -> Unit, onSpaces: () -> Unit) {
                 fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
                 modifier = Modifier.align(Alignment.CenterEnd).tap(R8) { onClose() }.padding(horizontal = 12.dp, vertical = 10.dp),
             )
+        }
+    }
+}
+
+/** A card in the Deck: one tab, or every tab open on the same site. */
+private class DeckEntry(val site: String?, val tabs: List<Tab>) {
+    val key: String get() = if (tabs.size > 1) "site:$site" else tabs[0].id
+}
+
+/**
+ * Tabs on the same site are shown as one group, where the first of them is; start pages and
+ * one-off sites stay single cards.
+ */
+private fun deckEntries(tabs: List<Tab>): List<DeckEntry> {
+    val bySite = tabs.filter { !it.showHome }.groupBy { t -> t.pageHost?.let(Url::site) ?: Url.host(t.url)?.let(Url::site) }
+    val out = ArrayList<DeckEntry>()
+    val done = HashSet<String>()
+    for (t in tabs) {
+        val site = if (t.showHome) null else t.pageHost?.let(Url::site) ?: Url.host(t.url)?.let(Url::site)
+        val same = site?.let { bySite[it] }.orEmpty()
+        when {
+            site == null || same.size < 2 -> out += DeckEntry(site, listOf(t))
+            done.add(site) -> out += DeckEntry(site, same)
+        }
+    }
+    return out
+}
+
+/** A stack of tabs on one site: the most recent one on top, the count beside the name. */
+@Composable
+private fun GroupCard(entry: DeckEntry, current: Boolean, modifier: Modifier, onOpen: () -> Unit, onCloseAll: () -> Unit) {
+    val haptics = rememberHaptics()
+    val top = entry.tabs.maxByOrNull { it.lastActive } ?: entry.tabs[0]
+    val shape = R12
+    var menu by remember { mutableStateOf(false) }
+    val name = remember(top.title, top.url) { Url.siteName(top.title, top.url) }
+    Box(modifier.fillMaxWidth().aspectRatio(0.72f)) {
+        // The cards underneath peek out at the top, so it reads as a pile of tabs.
+        Box(Modifier.fillMaxSize().padding(horizontal = 12.dp).clip(shape).background(Orb.Field).border(1.dp, Orb.Border, shape))
+        Box(Modifier.fillMaxSize().padding(start = 6.dp, end = 6.dp, top = 5.dp).clip(shape).background(Orb.Surface).border(1.dp, Orb.Border, shape))
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(top = 10.dp)
+                .clip(shape)
+                .background(Orb.Surface)
+                .border(if (current) 1.5.dp else 1.dp, if (current) Orb.Text else Orb.Border, shape)
+                .tap(shape, onLongClick = { haptics.heavy(); menu = true }) { onOpen() },
+        ) {
+            Row(Modifier.fillMaxWidth().height(40.dp).padding(start = 10.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                SiteIcon(top.url, 18.dp, top.favicon)
+                Spacer(Modifier.width(8.dp))
+                Text(name, style = MaterialTheme.typography.labelMedium, color = Orb.Text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(
+                    entry.tabs.size.toString(),
+                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = TNUM),
+                    color = Orb.OnContrast,
+                    modifier = Modifier.clip(CircleShape).background(Orb.Contrast).padding(horizontal = 7.dp, vertical = 1.dp),
+                )
+            }
+            Hairline()
+            Box(Modifier.fillMaxSize().background(Orb.Bg)) {
+                val thumb = top.thumbnail
+                if (thumb != null) Image(thumb, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, alignment = Alignment.TopCenter)
+                else Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                    SiteIcon(top.url, 32.dp, top.favicon)
+                    Spacer(Modifier.height(8.dp))
+                    Text("${entry.tabs.size} tabs", style = MaterialTheme.typography.bodySmall, color = Orb.Text2)
+                }
+            }
+        }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Orb.Surface) {
+            DropdownMenuItem(text = { Text("Show ${entry.tabs.size} tabs") }, onClick = { menu = false; onOpen() })
+            DropdownMenuItem(text = { Text("Close ${entry.tabs.size} tabs", color = Orb.Red) }, onClick = { menu = false; onCloseAll() })
+        }
+    }
+}
+
+/** Every tab open on one site, with a way back and a way to close them all. */
+@Composable
+private fun SiteGroup(entry: DeckEntry, onBack: () -> Unit, onOpen: (Tab) -> Unit, onCloseTab: (Tab) -> Unit, onCloseAll: () -> Unit) {
+    val browser = LocalBrowser.current
+    val first = entry.tabs[0]
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(Icons.AutoMirrored.Outlined.ArrowBack, "All tabs") { onBack() }
+            SiteIcon(first.url, 20.dp, first.favicon)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(entry.site.orEmpty(), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${entry.tabs.size} tabs", style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = TNUM), color = Orb.Text2)
+            }
+            Text(
+                "Close all",
+                style = MaterialTheme.typography.labelLarge, color = Orb.Red,
+                modifier = Modifier.tap(R8) { onCloseAll() }.padding(horizontal = 12.dp, vertical = 10.dp),
+            )
+        }
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            contentPadding = PaddingValues(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            items(entry.tabs, key = { it.id }) { t ->
+                TabCard(
+                    t,
+                    current = t.id == browser.currentId,
+                    modifier = Modifier.animateItem(),
+                    onOpen = { onOpen(t) },
+                    onClose = { onCloseTab(t) },
+                )
+            }
         }
     }
 }

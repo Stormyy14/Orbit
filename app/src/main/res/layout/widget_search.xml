@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Search bar widget: the whole pill opens search; the buttons do voice search and a ghost tab.
+     The bar keeps a search-bar height and sits centered in however tall the cell is. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+<LinearLayout
+    android:id="@+id/widget_search"
+    android:layout_width="match_parent"
+    android:layout_height="56dp"
+    android:layout_gravity="center_vertical"
+    android:background="@drawable/widget_pill"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="16dp"
+    android:paddingEnd="6dp">
+
+    <ImageView
+        android:layout_width="22dp"
+        android:layout_height="22dp"
+        android:importantForAccessibility="no"
+        android:src="@drawable/wi_mark" />
+
+    <TextView
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="12dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="@string/widget_search_hint"
+        android:textColor="@color/widget_text2"
+        android:textSize="15sp" />
+
+    <ImageView
+        android:id="@+id/widget_voice"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:contentDescription="@string/widget_voice"
+        android:padding="11dp"
+        android:src="@drawable/wi_mic" />
+
+    <ImageView
+        android:id="@+id/widget_ghost"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:contentDescription="@string/widget_ghost"
+        android:padding="11dp"
+        android:src="@drawable/wi_ghost" />
+</LinearLayout>
+</FrameLayout>

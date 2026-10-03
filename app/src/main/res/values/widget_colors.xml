@@ -1,0 +1,9 @@
+<resources>
+    <!-- Home-screen widgets follow the phone's light/dark mode (Orbit's light palette here). -->
+    <color name="widget_bg">#FFFFFFFF</color>
+    <color name="widget_field">#FFF2F2F2</color>
+    <color name="widget_border">#FFEBEBEB</color>
+    <color name="widget_text">#FF171717</color>
+    <color name="widget_text2">#FF5E5E5E</color>
+    <color name="widget_ghost">#FF7D3CB5</color>
+</resources>

@@ -26,6 +26,10 @@ Google Play. That's where most browser-engine security fixes arrive. On top of W
   filter lists, and are size-capped. Rules that run code (snippets, scriptlets) or rewrite
   requests are never used. Element-hiding selectors can't break out of their CSS rule (no braces,
   `;`, comments or unbalanced brackets), and regular-expression rules run with a step budget.
+- **Widgets only open Orbit.** Each widget button is an immutable intent to Orbit's own
+  activity; the actions they (or any other app) can ask for are harmless (open search, a new or
+  ghost tab, the Orbit VPN or Focus screen). Nothing outside the app can switch Orbit VPN or
+  Shields off.
 - **Orbit VPN fails closed.** While it's on but not connected, WebView's proxy points at a port no
   app can open, so nothing loads directly; the app's own requests refuse to go out too. Host
   names are resolved by Tor (SOCKS5), WebRTC is removed from pages (including fresh same-origin

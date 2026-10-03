@@ -1,0 +1,12 @@
+<resources>
+    <string name="widget_search_description">Search the web or open a site with Orbit, by typing or by voice</string>
+    <string name="widget_favorites_description">Your favorite sites, one tap away</string>
+    <string name="widget_actions_description">New tab, ghost tab, Orbit VPN and Focus</string>
+    <string name="widget_search_hint">Search or type URL</string>
+    <string name="widget_favorites_empty">Add favorites in Orbit and they show up here</string>
+    <string name="widget_new_tab">New tab</string>
+    <string name="widget_ghost">Ghost tab</string>
+    <string name="widget_vpn">Orbit VPN</string>
+    <string name="widget_focus">Focus</string>
+    <string name="widget_voice">Voice search</string>
+</resources>

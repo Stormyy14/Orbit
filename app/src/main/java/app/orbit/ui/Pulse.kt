@@ -102,7 +102,7 @@ private sealed interface Hit {
  * history. Results grow upward from the thumb, so the best match is always closest to it.
  */
 @Composable
-fun Pulse(tab: Tab?, commands: List<Command>, onClose: () -> Unit) {
+fun Pulse(tab: Tab?, commands: List<Command>, startVoice: Boolean = false, onClose: () -> Unit) {
     val browser = LocalBrowser.current
     val haptics = rememberHaptics()
     val keyboard = LocalSoftwareKeyboardController.current
@@ -126,6 +126,16 @@ fun Pulse(tab: Tab?, commands: List<Command>, onClose: () -> Unit) {
             }
         }
     }
+
+    fun listen() {
+        runCatching {
+            voice.launch(
+                Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH),
+            )
+        }.onFailure { browser.notify("Voice input isn't available") }
+    }
+    LaunchedEffect(Unit) { if (startVoice) listen() }
 
     fun go(input: String) {
         if (input.isBlank()) return
@@ -263,14 +273,7 @@ fun Pulse(tab: Tab?, commands: List<Command>, onClose: () -> Unit) {
                 if (field.text.isNotEmpty()) {
                     IconButton(Icons.Outlined.Close, "Clear", tint = Orb.Text3, size = 40.dp) { field = TextFieldValue("") }
                 } else {
-                    IconButton(Icons.Outlined.Mic, "Voice", tint = Orb.Text2, size = 40.dp) {
-                        runCatching {
-                            voice.launch(
-                                Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH),
-                            )
-                        }.onFailure { browser.notify("Voice input isn't available") }
-                    }
+                    IconButton(Icons.Outlined.Mic, "Voice", tint = Orb.Text2, size = 40.dp) { listen() }
                 }
                 Box(
                     Modifier.size(38.dp).clip(R8).background(Orb.Contrast).tap(R8) { hits.firstOrNull()?.let(::run) ?: onClose() },

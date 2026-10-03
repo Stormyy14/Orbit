@@ -127,6 +127,43 @@
             </intent-filter>
         </receiver>
 
+        <!-- Home-screen widgets: search bar, favorites, quick actions. -->
+        <receiver
+            android:name=".core.SearchWidget"
+            android:exported="false"
+            android:label="Orbit search">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_search_info" />
+        </receiver>
+
+        <receiver
+            android:name=".core.FavoritesWidget"
+            android:exported="false"
+            android:label="Orbit favorites">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_favorites_info" />
+        </receiver>
+
+        <receiver
+            android:name=".core.ActionsWidget"
+            android:exported="false"
+            android:label="Orbit quick actions">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_actions_info" />
+        </receiver>
+
         <service
             android:name=".core.MediaService"
             android:exported="false"
