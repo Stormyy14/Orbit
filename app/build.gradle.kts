@@ -12,8 +12,8 @@ android {
         applicationId = "io.github.stormyy14.orbitline"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.7.0"
+        versionCode = 10
+        versionName = "0.7.1"
     }
 
     // Release signing comes from ~/.gradle/gradle.properties (never from the repo).
