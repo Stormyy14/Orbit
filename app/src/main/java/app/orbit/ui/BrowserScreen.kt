@@ -1,5 +1,8 @@
 package app.orbit.ui
 
+import androidx.compose.runtime.rememberCoroutineScope
+import app.orbit.core.Updates
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.runtime.key
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.height
@@ -84,6 +87,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
     var pulse by remember { mutableStateOf(false) }
     var deck by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<SheetKind?>(null) }
+    val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val radial = remember {
         with(density) { RadialState(radiusPx = 120.dp.toPx(), marginPx = 30.dp.toPx(), deadPx = 36.dp.toPx(), liftPx = 26.dp.toPx()) }
@@ -113,6 +117,15 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
 
     fun open(kind: SheetKind) { sheet = kind }
 
+    // A new release is announced once: the update screen opens by itself the first time.
+    LaunchedEffect(Updates.available) {
+        val r = Updates.available ?: return@LaunchedEffect
+        if (sheet == null && Updates.shouldAnnounce(r)) {
+            Updates.markAnnounced(r)
+            sheet = SheetKind.Update
+        }
+    }
+
     val commands = remember(browser.spaces.toList(), tab?.id) {
         buildList {
             add(Command("New tab", "Open a new tab", Icons.Outlined.Add, "open") { browser.newTab(); pulse = true })
@@ -141,6 +154,10 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
             add(Command("Close tab", "Close the current tab", Icons.Outlined.Close, "") { browser.current?.let { browser.closeTab(it) } })
             add(Command("Customize", "Theme, colours, font, start page, app icon", Icons.Outlined.Palette, "theme look appearance colour color accent font wallpaper icon dark light") { open(SheetKind.Customize) })
             add(Command("Settings", "Search engine, privacy", Icons.Outlined.Settings, "preferences options") { open(SheetKind.Settings) })
+            add(Command("Check for updates", "Get the newest Orbit", Icons.Outlined.SystemUpdate, "update upgrade version new release") {
+                if (Updates.available != null) open(SheetKind.Update)
+                else Updates.check(scope) { r -> if (r != null) open(SheetKind.Update) else if (Updates.phase != Updates.Phase.FAILED) browser.notify("Orbit is up to date") else browser.notify(Updates.error ?: "Couldn't check for updates") }
+            })
             browser.spaces.forEach { s ->
                 add(Command("Switch to ${s.name}", "Space", spaceIcon(s.icon), "space") { browser.switchSpace(s.id) })
             }
@@ -206,6 +223,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
                             onProfiles = { open(SheetKind.Profiles) },
                             onAddSites = { open(SheetKind.QuickAdd) },
                             onCustomize = { open(SheetKind.Customize) },
+                            onUpdate = { open(SheetKind.Update) },
                         )
                     }
                     if (tab?.flowBlocked != null) FlowInterstitial(tab)
@@ -277,7 +295,8 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
             SheetKind.Shields -> ShieldsSheet(tab) { sheet = null }
             SheetKind.Spaces -> SpacesSheet { sheet = null }
             SheetKind.Flow -> FlowSheet { sheet = null }
-            SheetKind.Settings -> SettingsSheet(onCustomize = { sheet = SheetKind.Customize }) { sheet = null }
+            SheetKind.Settings -> SettingsSheet(onCustomize = { sheet = SheetKind.Customize }, onUpdate = { sheet = SheetKind.Update }) { sheet = null }
+            SheetKind.Update -> UpdateSheet { sheet = null }
             SheetKind.Customize -> CustomizeSheet { sheet = null }
             SheetKind.Trail -> TrailSheet(tab) { sheet = null }
             SheetKind.Profiles -> ProfilesSheet { sheet = null }

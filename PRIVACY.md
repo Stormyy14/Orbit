@@ -32,6 +32,8 @@ Settings → Data, or uninstall the app to remove everything.
 | You search | The search engine you chose in Settings | Your search, as on any browser. |
 | The start page shows a site you haven't visited yet | That site | A request for its icon (`/apple-touch-icon.png` or `/favicon.ico`). |
 | You open Reader view | The page's image hosts | Requests for the article's images. |
+| Orbit checks for updates (every few hours, or when you ask; can be turned off in Settings) | GitHub (`api.github.com`) | A request for the latest Orbit release. Nothing about you or your browsing is sent. |
+| You tap Update | GitHub (`github.com` and its download servers) | A download of the new Orbit APK and its checksum. |
 | You download a file | The file's server, via Android's Download Manager | The download request. |
 | Safe Browsing check | Google, via Android System WebView | WebView's built-in Safe Browsing uses partial URL hashes to warn about known dangerous sites. |
 
@@ -53,6 +55,8 @@ from your Google Account → Data & privacy → Third-party apps, or by revoking
 
 - **Internet / network state** — to load web pages.
 - **Vibration** — for haptic feedback (can be turned off in Settings).
+- **Install apps** — so Orbit can install its own updates. Android asks you to confirm every
+  update and only accepts one signed with the same key as the Orbit you have.
 - **Notifications** and **foreground service (media playback)** — to show media controls and keep
   video or music playing while Orbit is in the background. Asked for the first time something plays;
   "Keep playing in the background" in Settings turns it off.

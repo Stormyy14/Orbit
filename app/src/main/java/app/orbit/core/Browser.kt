@@ -203,6 +203,8 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
             }
         }
         syncNow()
+        Updates.init(activity)
+        Updates.checkIfDue(scope)
     }
 
     private fun storeFor(id: String?): Store = if (id == null) root else stores.getOrPut(id) { Store(activity, scope, "p/$id") }
@@ -329,6 +331,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
 
     fun onResume() {
         foreground = true
+        Updates.onResume(scope)
         current?.let { it.lastActive = System.currentTimeMillis(); it.webView?.onResume() }
         tick()
     }

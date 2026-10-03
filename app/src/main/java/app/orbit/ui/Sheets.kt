@@ -1,5 +1,9 @@
 package app.orbit.ui
 
+import androidx.compose.runtime.rememberCoroutineScope
+import app.orbit.core.Updates
+import androidx.compose.material.icons.outlined.Autorenew
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Palette
 import android.os.Build
@@ -88,7 +92,7 @@ import app.orbit.core.UserProfile
 import java.text.DateFormat
 import java.util.Date
 
-enum class SheetKind { Menu, Shields, Spaces, Flow, Settings, Trail, Profiles, QuickAdd, Customize }
+enum class SheetKind { Menu, Shields, Spaces, Flow, Settings, Trail, Profiles, QuickAdd, Customize, Update }
 
 private val Flat = RoundedCornerShape(0.dp)
 
@@ -610,11 +614,12 @@ fun FlowSheet(onDismiss: () -> Unit) {
 // =============================================================================================
 
 @Composable
-fun SettingsSheet(onCustomize: () -> Unit, onDismiss: () -> Unit) {
+fun SettingsSheet(onCustomize: () -> Unit, onUpdate: () -> Unit, onDismiss: () -> Unit) {
     val browser = LocalBrowser.current
     val context = LocalContext.current
     val s = browser.settings
     fun set(n: Settings) = browser.updateSettings(n)
+    val scope = rememberCoroutineScope()
     var licenses by remember { mutableStateOf(false) }
     var reading by remember { mutableStateOf<Component?>(null) }
     OrbSheet(onDismiss) {
@@ -673,6 +678,22 @@ fun SettingsSheet(onCustomize: () -> Unit, onDismiss: () -> Unit) {
                     Text("Version $version", style = MaterialTheme.typography.bodySmall, color = Orb.Text2)
                 }
             }
+            val update = Updates.available
+            ListRow(
+                if (update != null) "Update to ${update.version}" else "Check for updates",
+                subtitle = when {
+                    Updates.phase == Updates.Phase.CHECKING -> "Checking"
+                    update != null -> "A new version of Orbit is ready"
+                    Updates.phase == Updates.Phase.FAILED -> Updates.error
+                    Updates.upToDate -> "Orbit is up to date"
+                    else -> null
+                },
+                icon = Icons.Outlined.SystemUpdate,
+            ) {
+                if (update != null) onUpdate()
+                else Updates.check(scope) { r -> if (r != null) onUpdate() else if (Updates.phase != Updates.Phase.FAILED) browser.notify("Orbit is up to date") }
+            }
+            ToggleRow("Check for updates automatically", null, Updates.autoCheck, Icons.Outlined.Autorenew) { Updates.changeAutoCheck(it) }
             ListRow("Open-source licenses", icon = Icons.Outlined.Description) { licenses = true }
             Column(Modifier.padding(horizontal = 20.dp)) {
                 AboutLine("Android", Build.VERSION.RELEASE)

@@ -16,8 +16,12 @@
 3. Tap **Install**, then open Orbit. Optionally set it as your default browser in
    *Settings → Apps → Default apps → Browser app*.
 
-Updates: install a newer APK from Releases over the old one. Your tabs and settings are kept
-because every release is signed with the same key.
+Updates: Orbit checks GitHub Releases every few hours and tells you when a new version is out
+(a card on the start page, and an "Update" screen with what's new). Tap **Update**: it downloads
+the APK, checks it against the published SHA-256 and hands it to Android, which asks you to confirm.
+The first time, Android asks you to allow Orbit to install apps. You can also install a newer APK
+from Releases by hand. Either way your tabs and settings are kept, because every release is signed
+with the same key.
 
 Requirements: Android 8.0 or newer, with **Android System WebView** kept up to date from
 Google Play (it's the web engine, and where browser security fixes arrive).
@@ -48,6 +52,7 @@ Release signing certificate SHA-256:
 | **Reader view** | Articles with Dark / Paper / Light themes, serif or sans, adjustable size. |
 | **Tab history** | Every page the current tab has visited. Tap one to jump back. |
 | **Customize** | Theme (System, Light, Dark, true Black), accent colour, corner style, font (Geist, System, Serif, Mono), app text size, web page text size, address bar at the top or bottom, full address or domain, start page sections (clock, search, orbit, recently visited), a start page wallpaper from your photos, and the launcher icon. Saved per profile; open it from the palette button on the start page or *Menu → Customize*. |
+| **Updates** | Tells you when a new version is on GitHub and installs it for you (you confirm in Android's prompt). *Settings → Check for updates*; automatic checks can be turned off. |
 | **Background play** | Video and music keep playing with Orbit minimized or the screen off, with play/pause, previous/next and seek in the notification, on the lock screen and from headset buttons. Tap the notification to jump back to the tab. Can be turned off in Settings. |
 
 There's also:
@@ -122,6 +127,7 @@ app/src/main/java/app/orbit/
   core/Store.kt          debounced JSON persistence
   core/Media.kt          media notification, lock-screen controls, background playback service
   core/Customize.kt      start page wallpapers, launcher icon choices
+  core/Updates.kt        update check (GitHub Releases), download + SHA-256 check, install
   ui/StartPage.kt        orbit start page, ghost start page
   ui/OrbitBar.kt         bottom bar, gestures, quick-action arc
   ui/Pulse.kt            search / command palette
@@ -130,6 +136,7 @@ app/src/main/java/app/orbit/
   ui/Overlays.kt         preview, reader, find, focus screen, toasts
   ui/SpaceIcons.kt       the icons a space can use
   ui/Customize.kt        the Customize sheet
+  ui/Update.kt           the update screen and start page card
   ui/Theme.kt            tokens (Orb.*), palettes, accents, fonts, type scale
 branding/                logo sources and renders
 tools/logo.py            regenerates the logo, launcher icon and in-app mark

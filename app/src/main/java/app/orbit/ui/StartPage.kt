@@ -92,6 +92,7 @@ fun StartPage(
     onProfiles: () -> Unit,
     onAddSites: () -> Unit,
     onCustomize: () -> Unit,
+    onUpdate: () -> Unit,
 ) {
     val browser = LocalBrowser.current
     if (tab.ghost) {
@@ -157,7 +158,8 @@ fun StartPage(
                     ProfileBadge(browser.profile, 30.dp, tint = Orb.Text2)
                 }
             }
-            if (s.showClock) Clock()
+            UpdateCard(onUpdate)
+        if (s.showClock) Clock()
             Spacer(Modifier.height(20.dp))
             if (s.showSearch) SearchField("Search or type URL", onPulse)
 
