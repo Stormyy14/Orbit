@@ -74,11 +74,11 @@ Release signing certificate SHA-256:
 - **Focus:** block distracting sites for 15–90 minutes, with a 5-minute "open anyway".
 
 **Browsing**
-- **Orbit start page:** your favorite and most-visited sites on three tilted orbits you can spin,
-  plus recently visited pages.
-- **Satellite:** a small handle on the edge of the screen that fans out up to five favorite
-  sites on a half orbit, even over fullscreen games and videos. Turn it on from the ⋯ menu and
-  drag it to either side.
+- **Orbit start page:** your favorite sites on three tilted orbits you can spin, plus recently
+  visited pages.
+- **Satellite:** a small handle on the edge of the screen that fans out up to five sites you
+  pick from your orbit on a half orbit, even over fullscreen games and videos. Turn it on from
+  the ⋯ menu and drag it to either side.
 - **Orbit bar:** swipe ←/→ to switch tabs, ↑ for all tabs, ↓ to reload; long-press and slide for
   Back, Reload, Reader, New tab, Ghost tab and Forward.
 - **Search:** Google by default (or DuckDuckGo, Brave, Startpage, Ecosia, Bing); `!yt`, `!w`,

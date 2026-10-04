@@ -167,8 +167,8 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
             })
             add(Command("Reopen closed tab", "Undo the last close", Icons.Outlined.Restore, "undo restore") { browser.reopenClosed() })
             add(Command("Close ghost tabs", "Close all private tabs", Icons.Outlined.LocalFireDepartment, "clear private") { browser.burnGhosts() })
-            add(Command("Satellite", "Favorites on the edge of the screen", Icons.Outlined.SatelliteAlt, "game mode floating bubble quick sites favourites") {
-                browser.toggleSatellite()
+            add(Command("Satellite", "Orbit sites on the edge of the screen", Icons.Outlined.SatelliteAlt, "game mode floating bubble quick sites favourites") {
+                open(SheetKind.Satellite)
             })
             add(Command("Dark websites", "Darken pages in dark mode", Icons.Outlined.DarkMode, "night theme") {
                 browser.updateSettings(browser.settings.copy(darkPages = !browser.settings.darkPages))
@@ -319,7 +319,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
                     browser.peek == null && !radial.active && !browser.findOpen && !imeVisible && browser.linkMenu == null,
                 enter = fadeIn(tween(200)),
                 exit = fadeOut(tween(150)),
-            ) { Satellite(onAddSites = { open(SheetKind.QuickAdd) }) }
+            ) { Satellite(onEdit = { open(SheetKind.Satellite) }) }
         }
 
         when (sheet) {
@@ -339,6 +339,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
             SheetKind.Trail -> TrailSheet(tab) { sheet = null }
             SheetKind.Profiles -> ProfilesSheet { sheet = null }
             SheetKind.QuickAdd -> QuickAddSheet { sheet = null }
+            SheetKind.Satellite -> SatelliteSheet(onAddSites = { sheet = SheetKind.QuickAdd }) { sheet = null }
             null -> Unit
         }
         if (browser.linkMenu != null) LinkMenu { browser.linkMenu = null }

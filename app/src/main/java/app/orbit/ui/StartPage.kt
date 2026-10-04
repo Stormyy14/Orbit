@@ -89,7 +89,7 @@ import app.orbit.core.Url
 import java.text.DateFormat
 import java.util.Date
 
-data class Favorite(val url: String, val name: String, val pinned: Boolean)
+data class Favorite(val url: String, val name: String, val satellite: Boolean)
 
 @Composable
 fun StartPage(
@@ -109,7 +109,7 @@ fun StartPage(
         return
     }
     val space = browser.currentSpace
-    val favorites = remember(browser.profileId, browser.history.size, browser.pins.size, space) { favorites(browser, space) }
+    val favorites = favorites(browser)
     val recent = remember(browser.profileId, browser.history.size, space) {
         browser.history.asSequence().filter { it.spaceId == space.id && it.time > space.recentSince }
             .distinctBy { it.url.substringBefore('#') }.distinctBy { it.title.ifBlank { it.url } }.take(6).toList()
@@ -232,28 +232,9 @@ private fun SearchField(hint: String, onClick: () -> Unit) {
     }
 }
 
-internal fun favorites(browser: Browser, space: Space): List<Favorite> {
-    val cutoff = maxOf(System.currentTimeMillis() - 30L * 86_400_000L, space.orbitSince)
-    val counts = HashMap<String, Pair<Int, HistoryEntry>>()
-    browser.history.forEach { h ->
-        if (h.spaceId != space.id || h.time <= cutoff) return@forEach
-        val site = Url.host(h.url)?.let(Url::site) ?: return@forEach
-        val prev = counts[site]
-        counts[site] = (prev?.first ?: 0) + 1 to (prev?.second ?: h)
-    }
-    val pinned = browser.pins.map { Favorite(it.url, Url.siteName(it.title, it.url), true) }
-    val pinnedSites = pinned.mapNotNull { Url.host(it.url)?.let(Url::site) }.toSet()
-    val frequent = counts.entries
-        .filter { it.key !in pinnedSites }
-        .sortedByDescending { it.value.first }
-        .map { (_, v) ->
-            val h = v.second
-            Favorite("https://" + (Url.host(h.url) ?: ""), Url.siteName(h.title, h.url), false)
-        }
-    return (pinned + frequent).take(ORBIT_CAPACITY)
-}
-
-private const val ORBIT_CAPACITY = 12
+/** The orbit: your favorite sites only, in the order you added them. */
+internal fun favorites(browser: Browser): List<Favorite> =
+    browser.orbitPins.map { Favorite(it.url, Url.siteName(it.title, it.url), it.satellite) }
 
 /** How many sites sit on each orbit, inner to outer. */
 private val RingSizes = listOf(3, 4, 5)
@@ -269,8 +250,8 @@ private val RingPhase = listOf(0.35f, 1.25f, 2.2f)
 private const val TILT = 0.62f
 
 /**
- * Your most-visited and pinned sites on three tilted orbits around the current space.
- * Closest friends sit on the inner orbit. Drag sideways to spin; sites on the far side of an
+ * Your favorite sites on three tilted orbits around the current space, newest on the inner
+ * orbit. Sites that are also in Satellite wear a ring. Drag sideways to spin; sites on the far side of an
  * orbit are drawn smaller and fainter, and pass behind the centre. Starts empty, with a button
  * to add sites.
  */
@@ -383,7 +364,7 @@ private fun OrbitView(items: List<Favorite>, space: Space, onCenter: () -> Unit,
                                     .size(nodeDp)
                                     .clip(CircleShape)
                                     .background(Orb.Field)
-                                    .border(if (f.pinned) 1.5.dp else 0.dp, if (f.pinned) Orb.Contrast else Color.Transparent, CircleShape)
+                                    .border(if (f.satellite) 1.5.dp else 0.dp, if (f.satellite) Orb.Contrast else Color.Transparent, CircleShape)
                                     .tap(CircleShape, onLongClick = { haptics.heavy(); menuFor = f }) { haptics.tick(); browser.navigate(f.url) },
                                 contentAlignment = Alignment.Center,
                             ) { SiteIcon(f.url, nodeDp * 0.5f, shape = RoundedCornerShape(4.dp), framed = false) }
@@ -405,7 +386,10 @@ private fun OrbitView(items: List<Favorite>, space: Space, onCenter: () -> Unit,
                         }
                         DropdownMenu(expanded = menuFor == f, onDismissRequest = { menuFor = null }, containerColor = Orb.Surface) {
                             DropdownMenuItem(text = { Text("Add sites") }, onClick = { menuFor = null; onAdd() })
-                            DropdownMenuItem(text = { Text(if (f.pinned) "Unpin" else "Pin to inner orbit") }, onClick = {
+                            DropdownMenuItem(text = { Text(if (f.satellite) "Remove from Satellite" else "Add to Satellite") }, onClick = {
+                                menuFor = null; browser.toggleSatelliteSite(f.url)
+                            })
+                            DropdownMenuItem(text = { Text("Remove from orbit") }, onClick = {
                                 browser.togglePin(f.url, f.name); menuFor = null
                             })
                             DropdownMenuItem(text = { Text("Open in ghost tab") }, onClick = {
@@ -416,7 +400,7 @@ private fun OrbitView(items: List<Favorite>, space: Space, onCenter: () -> Unit,
                                 Url.host(f.url)?.let(browser::forgetSite); menuFor = null
                             })
                             DropdownMenuItem(text = { Text("Clear orbit", color = Orb.Red) }, onClick = {
-                                menuFor = null; browser.clearOrbit(space.id)
+                                menuFor = null; browser.clearOrbit()
                             })
                         }
                     }
@@ -431,9 +415,9 @@ private fun OrbitView(items: List<Favorite>, space: Space, onCenter: () -> Unit,
                 ) { onAdd() }
             } else {
                 IconButton(Icons.Outlined.DeleteSweep, "Clear orbit", Modifier.align(Alignment.TopStart), tint = Orb.Text2) {
-                    haptics.heavy(); browser.clearOrbit(space.id)
+                    haptics.heavy(); browser.clearOrbit()
                 }
-                if (items.size < ORBIT_CAPACITY) {
+                if (items.size < Browser.ORBIT_SIZE) {
                     IconButton(Icons.Outlined.Add, "Add sites", Modifier.align(Alignment.TopEnd), tint = Orb.Text2) { haptics.tick(); onAdd() }
                 }
             }

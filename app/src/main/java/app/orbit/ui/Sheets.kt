@@ -78,12 +78,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.webkit.WebViewCompat
+import app.orbit.core.Browser
 import app.orbit.core.SearchEngine
 import app.orbit.core.Settings
 import app.orbit.core.Space
@@ -100,7 +102,7 @@ import app.orbit.core.UserProfile
 import java.text.DateFormat
 import java.util.Date
 
-enum class SheetKind { Menu, Shields, Vpn, Spaces, Flow, Settings, Trail, Profiles, QuickAdd, Customize, Update }
+enum class SheetKind { Menu, Shields, Vpn, Spaces, Flow, Settings, Trail, Profiles, QuickAdd, Satellite, Customize, Update }
 
 private val Flat = RoundedCornerShape(0.dp)
 
@@ -149,7 +151,13 @@ fun PageMenu(tab: Tab?, open: (SheetKind) -> Unit, onDismiss: () -> Unit) {
                 Icons.Outlined.Timer, "Focus",
                 meta = if (browser.flowActive) "until " + DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(browser.flowUntil)) else null,
             ) { act { open(SheetKind.Flow) } }
-            MenuRow(Icons.Outlined.SatelliteAlt, "Satellite", checked = browser.settings.satellite) { act { browser.toggleSatellite() } }
+            MenuRow(Icons.Outlined.SatelliteAlt, "Satellite", checked = browser.settings.satellite) {
+                act {
+                    browser.toggleSatellite()
+                    // Nothing to show yet: go straight to picking its sites.
+                    if (browser.settings.satellite && browser.satellitePins.isEmpty()) open(SheetKind.Satellite)
+                }
+            }
             MenuRow(spaceIcon(browser.currentSpace.icon), "Spaces", meta = browser.currentSpace.name) { act { open(SheetKind.Spaces) } }
             MenuRow(Icons.Outlined.AccountCircle, "Profiles", meta = browser.profile?.name ?: "Guest") { act { open(SheetKind.Profiles) } }
             MenuRow(Icons.Outlined.Palette, "Customize") { act { open(SheetKind.Customize) } }
@@ -598,6 +606,84 @@ fun QuickAddSheet(onDismiss: () -> Unit) {
             }
         }
         PrimaryButton("Done", Modifier.padding(16.dp).fillMaxWidth()) { onDismiss() }
+    }
+}
+
+// =============================================================================================
+// Satellite
+// =============================================================================================
+
+/** Turns Satellite on or off and picks which orbit sites it holds. */
+@Composable
+fun SatelliteSheet(onAddSites: () -> Unit, onDismiss: () -> Unit) {
+    val browser = LocalBrowser.current
+    val haptics = rememberHaptics()
+    val orbit = browser.orbitPins
+    val picked = browser.satellitePins.size
+    val full = picked >= Browser.SATELLITE_SIZE
+    OrbSheet(onDismiss) {
+        Text("Satellite", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 20.dp, top = 4.dp))
+        Text(
+            if (orbit.isEmpty()) "Satellite holds sites from your orbit. Add some to the orbit first."
+            else "Pick up to ${Browser.SATELLITE_SIZE} sites from your orbit. They pop out of the handle on the edge of the screen.",
+            style = MaterialTheme.typography.bodyMedium, color = Orb.Text2,
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 4.dp),
+        )
+        ToggleRow("Show Satellite", null, browser.settings.satellite, Icons.Outlined.SatelliteAlt) {
+            browser.updateSettings(browser.settings.copy(satellite = it))
+        }
+        if (orbit.isNotEmpty()) {
+            Heading("From your orbit", trailing = "$picked of ${Browser.SATELLITE_SIZE}")
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
+                orbit.chunked(4).forEach { row ->
+                    Row(Modifier.fillMaxWidth()) {
+                        row.forEach { pin ->
+                            val on = pin.satellite
+                            val name = Url.siteName(pin.title, pin.url)
+                            Column(
+                                Modifier
+                                    .weight(1f)
+                                    .padding(2.dp)
+                                    .tap(R12) {
+                                        if (!on && full) haptics.reject()
+                                        else { haptics.tick(); browser.toggleSatelliteSite(pin.url, quiet = true) }
+                                    }
+                                    .padding(vertical = 8.dp)
+                                    .graphicsLayer { alpha = if (!on && full) 0.4f else 1f },
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Box(contentAlignment = Alignment.BottomEnd) {
+                                    Box(
+                                        Modifier
+                                            .size(48.dp)
+                                            .clip(CircleShape)
+                                            .background(Orb.Field)
+                                            .border(if (on) 1.5.dp else 0.dp, if (on) Orb.Text else Color.Transparent, CircleShape),
+                                        contentAlignment = Alignment.Center,
+                                    ) { SiteIcon(pin.url, 24.dp, shape = RoundedCornerShape(4.dp), framed = false) }
+                                    if (on) {
+                                        Box(
+                                            Modifier.size(18.dp).clip(CircleShape).background(Orb.Contrast),
+                                            contentAlignment = Alignment.Center,
+                                        ) { Icon(Icons.Outlined.Check, "In Satellite", tint = Orb.OnContrast, modifier = Modifier.size(12.dp)) }
+                                    }
+                                }
+                                Text(
+                                    name, style = MaterialTheme.typography.labelSmall, color = if (on) Orb.Text else Orb.Text2,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp),
+                                )
+                            }
+                        }
+                        // Keeps the last row's sites the same width as the rows above.
+                        repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
+        Row(Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SecondaryButton("Add to orbit", Modifier.weight(1f), icon = Icons.Outlined.Add) { onAddSites() }
+            PrimaryButton("Done", Modifier.weight(1f)) { onDismiss() }
+        }
     }
 }
 

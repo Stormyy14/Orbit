@@ -108,7 +108,7 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
             Heading("Start page")
             ToggleRow("Clock", null, s.showClock, Icons.Outlined.Schedule) { set(s.copy(showClock = it)) }
             ToggleRow("Search field", null, s.showSearch, Icons.Outlined.Search) { set(s.copy(showSearch = it)) }
-            ToggleRow("Orbit", "Your most-visited sites", s.showOrbit, Icons.Outlined.TripOrigin) { set(s.copy(showOrbit = it)) }
+            ToggleRow("Orbit", "Your favorite sites", s.showOrbit, Icons.Outlined.TripOrigin) { set(s.copy(showOrbit = it)) }
             ToggleRow("Recently visited", null, s.showRecent, Icons.Outlined.History) { set(s.copy(showRecent = it)) }
             ListRow(
                 "Wallpaper",

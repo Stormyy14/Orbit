@@ -8,13 +8,11 @@ data class Space(
     val name: String,
     /** Key into the UI's icon set (see ui/SpaceIcons.kt). */
     val icon: String,
-    /** The orbit only counts visits after this (set when the orbit is cleared). */
-    val orbitSince: Long = 0L,
     /** "Recently visited" only lists visits after this. */
     val recentSince: Long = 0L,
 ) {
     fun toJson() = JSONObject().put("id", id).put("name", name).put("icon", icon)
-        .put("orbit", orbitSince).put("recent", recentSince)
+        .put("recent", recentSince)
 
     companion object {
         const val DEFAULT_ID = "personal"
@@ -24,7 +22,7 @@ data class Space(
             val name = o.optString("name", "Space")
             return Space(
                 id, name, o.optString("icon").ifBlank { guessIcon(id, name) },
-                orbitSince = o.optLong("orbit"), recentSince = o.optLong("recent"),
+                recentSince = o.optLong("recent"),
             )
         }
 
@@ -68,11 +66,12 @@ data class HistoryEntry(
     }
 }
 
-data class Pin(val url: String, val title: String) {
-    fun toJson() = JSONObject().put("u", url).put("t", title)
+/** A site on the orbit. [satellite]: also one of the sites Satellite fans out. */
+data class Pin(val url: String, val title: String, val satellite: Boolean = false) {
+    fun toJson(): JSONObject = JSONObject().put("u", url).put("t", title).apply { if (satellite) put("s", true) }
 
     companion object {
-        fun fromJson(o: JSONObject) = Pin(o.getString("u"), o.optString("t"))
+        fun fromJson(o: JSONObject) = Pin(o.getString("u"), o.optString("t"), o.optBoolean("s"))
     }
 }
 

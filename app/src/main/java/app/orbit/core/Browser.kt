@@ -1034,6 +1034,33 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
 
     fun isPinned(url: String) = pins.any { it.url.trimEnd('/') == url.trimEnd('/') }
 
+    /** The sites on the start page orbit: your favorites, nothing added from history. */
+    val orbitPins: List<Pin> get() = pins.take(ORBIT_SIZE)
+
+    /** The orbit sites you picked for Satellite, at most [SATELLITE_SIZE]. */
+    val satellitePins: List<Pin> get() = orbitPins.filter { it.satellite }.take(SATELLITE_SIZE)
+
+    fun inSatellite(url: String) = pins.any { it.satellite && it.url.trimEnd('/') == url.trimEnd('/') }
+
+    /** Adds an orbit site to Satellite or takes it off. Only sites on the orbit can be added. */
+    fun toggleSatelliteSite(url: String, quiet: Boolean = false) {
+        val i = pins.indexOfFirst { it.url.trimEnd('/') == url.trimEnd('/') }
+        if (i < 0) return
+        val p = pins[i]
+        if (!p.satellite && satellitePins.size >= SATELLITE_SIZE) {
+            notify("Satellite holds $SATELLITE_SIZE sites. Take one off first")
+            return
+        }
+        pins[i] = p.copy(satellite = !p.satellite)
+        savePins()
+        if (quiet) return
+        when {
+            p.satellite -> notify("Removed from Satellite")
+            settings.satellite -> notify("Added to Satellite")
+            else -> notify("Added to Satellite", "Turn on") { toggleSatellite() }
+        }
+    }
+
     fun removeHistory(entry: HistoryEntry) {
         history.remove(entry); saveHistory()
     }
@@ -1070,20 +1097,12 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         }
     }
 
-    /**
-     * Empties the orbit of a space: favorites are unpinned and earlier visits stop counting.
-     * Sites come back as you visit them again. Can be undone.
-     */
-    fun clearOrbit(spaceId: String) {
-        val space = spaces.firstOrNull { it.id == spaceId } ?: return
+    /** Empties the orbit (and so Satellite): every favorite is removed. Can be undone. */
+    fun clearOrbit() {
         val oldPins = pins.toList()
         pins.clear()
         savePins()
-        updateSpace(space.copy(orbitSince = System.currentTimeMillis()))
-        notify("Orbit cleared", "Undo") {
-            pins.clear(); pins.addAll(oldPins); savePins()
-            spaces.firstOrNull { it.id == spaceId }?.let { updateSpace(it.copy(orbitSince = space.orbitSince)) }
-        }
+        notify("Orbit cleared", "Undo") { pins.clear(); pins.addAll(oldPins); savePins() }
     }
 
     fun forgetSite(host: String) {
@@ -1774,6 +1793,12 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     }
 
     companion object {
+        /** How many favorites the start page orbit shows. */
+        const val ORBIT_SIZE = 12
+
+        /** How many orbit sites Satellite holds. */
+        const val SATELLITE_SIZE = 5
+
         /**
          * The system picker for an `<input type="file">`. WebView's own createIntent only looks at the
          * first accept type (often an extension like ".jpg", which matches nothing) and never allows

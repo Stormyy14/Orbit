@@ -66,9 +66,6 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-/** How many favorites Satellite holds. */
-private const val MAX_SITES = 5
-
 private val HandleW = 26.dp
 private val HandleH = 58.dp
 private val Node = 48.dp
@@ -81,25 +78,23 @@ private const val STEP = (PI / 5).toFloat()
 
 /**
  * Satellite: a small handle on the left or right edge, over pages and fullscreen games alike.
- * Tap it and up to five favorites swing out on a half orbit around it; tap one to jump to it.
- * Drag the handle to move it up and down or to the other side. It fades back when left alone.
+ * Tap it and the orbit sites you picked for it (up to five) swing out on a half orbit around it;
+ * tap one to jump to it, long-press to change which ones. Drag the handle to move it up and down
+ * or to the other side. It fades back when left alone.
  */
 @Composable
-fun Satellite(onAddSites: () -> Unit) {
+fun Satellite(onEdit: () -> Unit) {
     val browser = LocalBrowser.current
     val haptics = rememberHaptics()
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val s = browser.settings
-    val space = browser.currentSpace
-    val sites = remember(browser.profileId, browser.history.size, browser.pins.size, space) {
-        favorites(browser, space).take(MAX_SITES)
-    }
-    val count = sites.size.coerceAtLeast(1) // An empty orbit still offers "Add sites".
+    val sites = browser.satellitePins.map { Favorite(it.url, Url.siteName(it.title, it.url), true) }
+    val count = sites.size.coerceAtLeast(1) // Empty, it offers a button to pick sites.
 
     var open by remember { mutableStateOf(false) }
     val progress = remember { Animatable(0f) }
-    val nodes = remember { List(MAX_SITES) { Animatable(0f) } }
+    val nodes = remember { List(Browser.SATELLITE_SIZE) { Animatable(0f) } }
     var left by remember(s.satelliteLeft) { mutableStateOf(s.satelliteLeft) }
     var y by remember(s.satelliteY) { mutableFloatStateOf(s.satelliteY) }
     val dragX = remember { Animatable(0f) }
@@ -222,18 +217,18 @@ fun Satellite(onAddSites: () -> Unit) {
                         .size(Node)
                         .shadow(8.dp, CircleShape)
                         .background(Orb.Surface, CircleShape)
-                        .border(if (f?.pinned == true) 1.5.dp else 1.dp, if (f?.pinned == true) Orb.Contrast else Orb.Border, CircleShape)
-                        .tap(CircleShape) {
+                        .border(1.dp, Orb.Border, CircleShape)
+                        .tap(CircleShape, onLongClick = { haptics.heavy(); open = false; onEdit() }) {
                             haptics.confirm()
-                            if (f != null) go(f.url) else { open = false; onAddSites() }
+                            if (f != null) go(f.url) else { open = false; onEdit() }
                         },
                     contentAlignment = Alignment.Center,
                 ) {
                     if (f != null) SiteIcon(f.url, 24.dp, shape = RoundedCornerShape(5.dp), framed = false)
-                    else Icon(Icons.Outlined.Add, "Add sites", tint = Orb.Text, modifier = Modifier.size(22.dp))
+                    else Icon(Icons.Outlined.Add, "Pick sites", tint = Orb.Text, modifier = Modifier.size(22.dp))
                 }
                 Text(
-                    f?.name ?: "Add sites",
+                    f?.name ?: "Pick sites",
                     style = MaterialTheme.typography.labelSmall,
                     color = Orb.Text,
                     maxLines = 1,
