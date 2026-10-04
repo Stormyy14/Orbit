@@ -129,6 +129,11 @@ data class Settings(
     ),
     /** Keep video and music playing with Orbit in the background, with media controls. */
     val backgroundPlay: Boolean = true,
+    /** Satellite: a handle on the side of the screen that fans out your favorite sites. */
+    val satellite: Boolean = false,
+    /** Which edge the Satellite handle sits on, and how far down (0 = top, 1 = bottom). */
+    val satelliteLeft: Boolean = false,
+    val satelliteY: Float = 0.4f,
     // Look
     val theme: ThemeMode = ThemeMode.SYSTEM,
     val accent: Accent = Accent.MONO,
@@ -178,6 +183,9 @@ data class Settings(
         .put("collapse", collapseOnScroll)
         .put("flow", JSONArray(flowDomains))
         .put("bgPlay", backgroundPlay)
+        .put("satellite", satellite)
+        .put("satLeft", satelliteLeft)
+        .put("satY", satelliteY.toDouble())
         .put("theme", theme.name)
         .put("accent", accent.name)
         .put("corners", corners.name)
@@ -216,6 +224,9 @@ data class Settings(
                 collapseOnScroll = o.optBoolean("collapse", d.collapseOnScroll),
                 flowDomains = o.optJSONArray("flow")?.let { a -> List(a.length()) { a.getString(it) } } ?: d.flowDomains,
                 backgroundPlay = o.optBoolean("bgPlay", d.backgroundPlay),
+                satellite = o.optBoolean("satellite", d.satellite),
+                satelliteLeft = o.optBoolean("satLeft", d.satelliteLeft),
+                satelliteY = o.optDouble("satY", d.satelliteY.toDouble()).toFloat().coerceIn(0f, 1f),
                 theme = enumOr(o.optString("theme"), d.theme),
                 accent = enumOr(o.optString("accent"), d.accent),
                 corners = enumOr(o.optString("corners"), d.corners),

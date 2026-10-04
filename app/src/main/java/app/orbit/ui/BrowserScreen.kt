@@ -57,6 +57,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.SatelliteAlt
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -166,6 +167,9 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
             })
             add(Command("Reopen closed tab", "Undo the last close", Icons.Outlined.Restore, "undo restore") { browser.reopenClosed() })
             add(Command("Close ghost tabs", "Close all private tabs", Icons.Outlined.LocalFireDepartment, "clear private") { browser.burnGhosts() })
+            add(Command("Satellite", "Favorites on the edge of the screen", Icons.Outlined.SatelliteAlt, "game mode floating bubble quick sites favourites") {
+                browser.toggleSatellite()
+            })
             add(Command("Dark websites", "Darken pages in dark mode", Icons.Outlined.DarkMode, "night theme") {
                 browser.updateSettings(browser.settings.copy(darkPages = !browser.settings.darkPages))
             })
@@ -308,6 +312,14 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
             RadialOverlay(radial)
 
             browser.customView?.let { FullscreenHost(it) }
+
+            // Satellite stays on top, fullscreen games and videos included.
+            AnimatedVisibility(
+                visible = browser.settings.satellite && !pulse && !deck && sheet == null && browser.reader == null &&
+                    browser.peek == null && !radial.active && !browser.findOpen && !imeVisible && browser.linkMenu == null,
+                enter = fadeIn(tween(200)),
+                exit = fadeOut(tween(150)),
+            ) { Satellite(onAddSites = { open(SheetKind.QuickAdd) }) }
         }
 
         when (sheet) {

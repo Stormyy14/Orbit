@@ -9,7 +9,6 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.webkit.WebChromeClient
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -35,7 +34,7 @@ class MainActivity : ComponentActivity() {
     private var appliedTheme: ThemeMode? = null
 
     private val filePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        pendingFiles?.invoke(WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data))
+        pendingFiles?.invoke(Browser.pickedFiles(result.resultCode, result.data))
         pendingFiles = null
     }
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }

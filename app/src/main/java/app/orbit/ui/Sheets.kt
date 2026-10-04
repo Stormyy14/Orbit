@@ -5,6 +5,7 @@ import app.orbit.core.Updates
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.SatelliteAlt
 import androidx.compose.material.icons.outlined.Palette
 import android.os.Build
 import androidx.compose.foundation.background
@@ -148,6 +149,7 @@ fun PageMenu(tab: Tab?, open: (SheetKind) -> Unit, onDismiss: () -> Unit) {
                 Icons.Outlined.Timer, "Focus",
                 meta = if (browser.flowActive) "until " + DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(browser.flowUntil)) else null,
             ) { act { open(SheetKind.Flow) } }
+            MenuRow(Icons.Outlined.SatelliteAlt, "Satellite", checked = browser.settings.satellite) { act { browser.toggleSatellite() } }
             MenuRow(spaceIcon(browser.currentSpace.icon), "Spaces", meta = browser.currentSpace.name) { act { open(SheetKind.Spaces) } }
             MenuRow(Icons.Outlined.AccountCircle, "Profiles", meta = browser.profile?.name ?: "Guest") { act { open(SheetKind.Profiles) } }
             MenuRow(Icons.Outlined.Palette, "Customize") { act { open(SheetKind.Customize) } }

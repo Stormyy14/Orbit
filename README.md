@@ -76,6 +76,9 @@ Release signing certificate SHA-256:
 **Browsing**
 - **Orbit start page:** your favorite and most-visited sites on three tilted orbits you can spin,
   plus recently visited pages.
+- **Satellite:** a small handle on the edge of the screen that fans out up to five favorite
+  sites on a half orbit, even over fullscreen games and videos. Turn it on from the ⋯ menu and
+  drag it to either side.
 - **Orbit bar:** swipe ←/→ to switch tabs, ↑ for all tabs, ↓ to reload; long-press and slide for
   Back, Reload, Reader, New tab, Ghost tab and Forward.
 - **Search:** Google by default (or DuckDuckGo, Brave, Startpage, Ecosia, Bing); `!yt`, `!w`,
@@ -161,6 +164,7 @@ app/src/main/java/app/orbit/
   core/Updates.kt        update check (GitHub Releases), download + SHA-256 check, install
   ui/StartPage.kt        orbit start page, ghost start page
   ui/OrbitBar.kt         bottom bar, gestures, quick-action arc
+  ui/Satellite.kt        the favorites handle on the screen edge
   ui/Pulse.kt            search / command palette
   ui/Deck.kt             tab switcher, site groups
   ui/Sheets.kt           menu, shields, spaces, focus, settings, licenses, tab history, link menu

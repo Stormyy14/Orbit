@@ -232,7 +232,7 @@ private fun SearchField(hint: String, onClick: () -> Unit) {
     }
 }
 
-private fun favorites(browser: Browser, space: Space): List<Favorite> {
+internal fun favorites(browser: Browser, space: Space): List<Favorite> {
     val cutoff = maxOf(System.currentTimeMillis() - 30L * 86_400_000L, space.orbitSince)
     val counts = HashMap<String, Pair<Int, HistoryEntry>>()
     browser.history.forEach { h ->

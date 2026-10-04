@@ -20,6 +20,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
+import android.webkit.MimeTypeMap
 import android.webkit.PermissionRequest
 import android.webkit.SslErrorHandler
 import android.webkit.URLUtil
@@ -310,6 +311,12 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         val flow = flowMinutesTotal
         val off = shieldsOff.toList()
         store.write("stats", 2000) { JSONObject().put("blocked", blocked).put("flow", flow).put("shieldsOff", JSONArray(off)).toString() }
+    }
+
+    /** Shows or hides Satellite, the favorites handle on the edge of the screen. */
+    fun toggleSatellite() {
+        updateSettings(settings.copy(satellite = !settings.satellite))
+        notify(if (settings.satellite) "Satellite on · drag it to move it" else "Satellite off")
     }
 
     fun updateSettings(s: Settings) {
@@ -1747,8 +1754,11 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
                 fileChooserParams: FileChooserParams,
             ): Boolean {
                 val launcher = fileChooser ?: return false
-                val intent = runCatching { fileChooserParams.createIntent() }.getOrNull() ?: return false
-                launcher(intent) { uris -> filePathCallback.onReceiveValue(uris) }
+                val multiple = fileChooserParams.mode == FileChooserParams.MODE_OPEN_MULTIPLE
+                launcher(filePickerIntent(fileChooserParams.acceptTypes, multiple)) { uris ->
+                    // A single-file input takes one file even if the picker returned several.
+                    filePathCallback.onReceiveValue(if (multiple || uris == null) uris else uris.take(1).toTypedArray())
+                }
                 return true
             }
 
@@ -1764,6 +1774,44 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     }
 
     companion object {
+        /**
+         * The system picker for an `<input type="file">`. WebView's own createIntent only looks at the
+         * first accept type (often an extension like ".jpg", which matches nothing) and never allows
+         * picking several files, so the intent is built here instead.
+         */
+        fun filePickerIntent(acceptTypes: Array<String>?, multiple: Boolean): Intent {
+            val mimes = acceptTypes.orEmpty()
+                .flatMap { it.split(',') }
+                .map { it.trim().lowercase() }
+                .filter { it.isNotEmpty() }
+                .map { if (it.startsWith('.')) MimeTypeMap.getSingleton().getMimeTypeFromExtension(it.drop(1)) ?: "*/*" else it }
+                .distinct()
+            return Intent(Intent.ACTION_GET_CONTENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                when {
+                    mimes.isEmpty() || "*/*" in mimes -> type = "*/*"
+                    mimes.size == 1 -> type = mimes[0]
+                    else -> {
+                        type = "*/*"
+                        putExtra(Intent.EXTRA_MIME_TYPES, mimes.toTypedArray())
+                    }
+                }
+                if (multiple) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            }
+        }
+
+        /** The files a picker returned: several come back as ClipData, a single one as the data URI. */
+        fun pickedFiles(resultCode: Int, data: Intent?): Array<Uri>? {
+            if (resultCode != android.app.Activity.RESULT_OK || data == null) return null
+            val clip = data.clipData
+            val uris = if (clip != null && clip.itemCount > 0) {
+                (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri }
+            } else {
+                listOfNotNull(data.data)
+            }
+            return uris.takeIf { it.isNotEmpty() }?.toTypedArray()
+        }
+
         /** [Tab.pendingUrl] for a tab whose saved state is restored once the route is ready. */
         private const val RESTORE = "orbit:restore"
 
