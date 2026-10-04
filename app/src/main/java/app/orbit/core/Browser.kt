@@ -116,6 +116,14 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     val zaps = mutableStateMapOf<String, List<String>>()
     /** sites where the user switched shields off. */
     val shieldsOff = mutableStateListOf<String>()
+    /** Installed extensions (user scripts). Kept on this device, per profile. */
+    val extensions = mutableStateListOf<Extension>()
+    /** Bumped whenever [extensions] changes, so each tab knows to swap its scripts. */
+    private var extensionsVersion = 0
+    /** An extension waiting for the user to confirm installing it. */
+    var pendingExtension by mutableStateOf<Extension?>(null)
+    /** The link being fetched to offer as an extension, so it isn't fetched twice at once. */
+    private var fetchingExtension: String? = null
     var settings by mutableStateOf(Settings())
         private set
     var totalBlocked by mutableLongStateOf(0L)
@@ -233,6 +241,10 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         store.readObject("zaps")?.let { o ->
             o.keys().forEach { k -> val a = o.getJSONArray(k); zaps[k] = List(a.length()) { a.getString(it) } }
         }
+        store.readArray("extensions")?.let { a ->
+            for (i in 0 until a.length()) runCatching { Extension.fromJson(a.getJSONObject(i)) }.onSuccess { extensions += it }
+        }
+        extensionsVersion++
         store.readObject("stats")?.let {
             totalBlocked = it.optLong("blocked")
             flowMinutesTotal = it.optInt("flow")
@@ -306,6 +318,13 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         changed()
     }
 
+    private fun saveExtensions() {
+        val snap = extensions.toList()
+        store.write("extensions") { JSONArray().apply { snap.forEach { put(it.toJson()) } }.toString() }
+        extensionsVersion++
+        syncAllScripts()
+    }
+
     private fun saveStats() {
         val blocked = totalBlocked
         val flow = flowMinutesTotal
@@ -327,19 +346,123 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         changed()
     }
 
-    /** Uses a picked image as this profile's start page wallpaper. */
-    fun setWallpaper(uri: Uri) {
+    /** Uses a picked image as this profile's start page wallpaper, framed afresh; [onSaved] follows. */
+    fun setWallpaper(uri: Uri, onSaved: () -> Unit = {}) {
         val id = profileId
         scope.launch {
             if (Wallpapers.save(activity, uri, id) && id == profileId) {
-                updateSettings(settings.copy(wallpaper = System.currentTimeMillis()))
+                val d = Settings()
+                updateSettings(settings.withWallpaperOf(d).copy(wallpaper = System.currentTimeMillis()))
+                onSaved()
             } else if (id == profileId) notify("Couldn't use that image")
         }
     }
 
     fun removeWallpaper() {
         Wallpapers.delete(activity, profileId)
-        updateSettings(settings.copy(wallpaper = 0L))
+        updateSettings(settings.withWallpaperOf(Settings()))
+    }
+
+    // =====================================================================================
+    // Extensions
+    // =====================================================================================
+
+    /** The extensions running on the page [tab] shows. */
+    fun extensionsOn(tab: Tab?): List<Extension> {
+        if (tab == null || tab.showHome || tab.ghost) return emptyList()
+        val url = tab.url
+        return extensions.filter { it.enabled && it.runsOn(url) }
+    }
+
+    /** Fetches the user script at [url] and asks whether to install it. */
+    fun offerExtension(url: String) {
+        if (fetchingExtension == url) return
+        if (!url.startsWith("https://")) return notify("Extensions are only installed from secure (https) links")
+        fetchingExtension = url
+        val id = profileId
+        scope.launch {
+            val result = runCatching {
+                val code = fetchText(url)
+                UserScripts.parse(code, url)?.let { withLibraries(it) }
+            }
+            fetchingExtension = null
+            if (id != profileId) return@launch
+            result.onSuccess { e -> if (e != null) pendingExtension = e else notify("That link isn't a user script") }
+                .onFailure { notify(if (Vpn.enabled) "Couldn't get the extension through Orbit VPN" else "Couldn't get the extension") }
+        }
+    }
+
+    /** Pasted text: either a user script's code or a link to one. */
+    fun offerExtensionText(text: String) {
+        val t = text.trim()
+        if ((t.startsWith("http://") || t.startsWith("https://")) && t.none { it.isWhitespace() }) return offerExtension(t)
+        val e = UserScripts.parse(t, null) ?: return notify("That isn't a user script (it needs a ==UserScript== header)")
+        val id = profileId
+        scope.launch {
+            val full = runCatching { withLibraries(e) }.getOrNull()
+            if (id != profileId) return@launch
+            if (full != null) pendingExtension = full else notify("Couldn't get the libraries this script needs")
+        }
+    }
+
+    private suspend fun withLibraries(e: Extension): Extension =
+        if (e.requires.isEmpty()) e else e.copy(libs = e.requires.map { fetchText(it) }.joinToString("\n;\n"))
+
+    /** A script or library, through Orbit VPN when it's on; https only, all the way. */
+    private suspend fun fetchText(url: String): String = withContext(Dispatchers.IO) {
+        if (!url.startsWith("https://")) throw java.io.IOException("Not https")
+        val conn = Net.open(url, 10_000, 20_000)
+        try {
+            if (conn.responseCode !in 200..299) throw java.io.IOException("HTTP ${conn.responseCode}")
+            if (conn.url.protocol != "https") throw java.io.IOException("Redirected off https")
+            val out = java.io.ByteArrayOutputStream()
+            conn.inputStream.use { input ->
+                val buf = ByteArray(32 * 1024)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    if (out.size() > UserScripts.MAX_BYTES) throw java.io.IOException("Too large")
+                }
+            }
+            out.toString("UTF-8")
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** Installs [e], replacing an installed copy of the same script (kept on or off as it was). */
+    fun installExtension(e: Extension) {
+        pendingExtension = null
+        val i = extensions.indexOfFirst { it.name == e.name && it.namespace == e.namespace }
+        val update = i >= 0
+        if (update) extensions[i] = e.copy(id = extensions[i].id, enabled = extensions[i].enabled) else extensions += e
+        saveExtensions()
+        val done = if (update) "${e.name} updated" else "${e.name} added"
+        val cur = current
+        if (cur != null && !cur.showHome && !cur.ghost && e.runsOn(cur.url)) notify(done, "Reload") { reload(cur) }
+        else notify(done)
+    }
+
+    fun setExtensionEnabled(id: String, on: Boolean) {
+        val i = extensions.indexOfFirst { it.id == id }
+        if (i < 0) return
+        val e = extensions[i].copy(enabled = on)
+        extensions[i] = e
+        saveExtensions()
+        val cur = current
+        if (cur != null && !cur.showHome && !cur.ghost && e.runsOn(cur.url)) {
+            notify(if (on) "${e.name} on" else "${e.name} off", "Reload") { reload(cur) }
+        }
+    }
+
+    fun removeExtension(id: String) {
+        val e = extensions.firstOrNull { it.id == id } ?: return
+        extensions.remove(e)
+        saveExtensions()
+        notify("${e.name} removed", "Undo") {
+            if (extensions.none { it.id == e.id }) { extensions += e; saveExtensions() }
+        }
     }
 
     fun onPause() {
@@ -637,7 +760,8 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         reader = null
         linkMenu = null
         tabs.forEach { destroyWebView(it) }
-        tabs.clear(); spaces.clear(); history.clear(); pins.clear(); zaps.clear(); shieldsOff.clear(); closed.clear()
+        tabs.clear(); spaces.clear(); history.clear(); pins.clear(); zaps.clear(); shieldsOff.clear(); closed.clear(); extensions.clear()
+        pendingExtension = null
         wipeGhosts()
         flowUntil = 0L; flowBypass.clear()
         settings = Settings(); totalBlocked = 0L; flowMinutesTotal = 0
@@ -745,8 +869,8 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     private fun applySyncBundle(o: JSONObject) {
         applyingRemote = true
         try {
-            // The wallpaper image stays on each device, so keep this device's choice.
-            o.optJSONObject("settings")?.let { updateSettings(Settings.fromJson(it).copy(wallpaper = settings.wallpaper)) }
+            // The wallpaper image stays on each device, so keep this device's choice and framing.
+            o.optJSONObject("settings")?.let { updateSettings(Settings.fromJson(it).withWallpaperOf(settings)) }
             o.optJSONArray("spaces")?.let { a ->
                 val remote = List(a.length()) { Space.fromJson(a.getJSONObject(it)) }
                 if (remote.isEmpty()) return@let
@@ -1253,6 +1377,8 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         tab.webView = null
         tab.youtubeScript = null
         tab.noRtcScript = null
+        tab.extensionScripts.clear()
+        tab.extensionsVersion = -1
         if (tab.pendingUrl == RESTORE) tab.pendingUrl = null
         (wv.parent as? ViewGroup)?.removeView(wv)
         runCatching {
@@ -1463,6 +1589,20 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
             tab.noRtcScript?.let { runCatching { it.remove() } }
             tab.noRtcScript = null
         }
+        // Extensions stay out of ghost tabs, as in other browsers' private windows.
+        if (tab.extensionsVersion != extensionsVersion) {
+            tab.extensionScripts.forEach { runCatching { it.remove() } }
+            tab.extensionScripts.clear()
+            if (!tab.ghost) {
+                extensions.filter { it.enabled }.forEach { e ->
+                    runCatching { WebViewCompat.addDocumentStartJavaScript(wv, UserScripts.script(e), setOf("*")) }.getOrNull()
+                        ?.let(tab.extensionScripts::add)
+                }
+                runCatching { WebViewCompat.addDocumentStartJavaScript(wv, UserScripts.storeBridge(extensions.toList()), UserScripts.STORE_ORIGINS) }
+                    .getOrNull()?.let(tab.extensionScripts::add)
+            }
+            tab.extensionsVersion = extensionsVersion
+        }
     }
 
     private fun syncAllScripts() = (tabs + listOfNotNull(peek)).forEach(::syncScripts)
@@ -1616,6 +1756,11 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
                 val url = request.url.toString()
                 val scheme = request.url.scheme?.lowercase()
                 if (request.isForMainFrame && (scheme == "http" || scheme == "https") && request.method.equals("GET", ignoreCase = true)) {
+                    // A user script link offers to install it rather than showing its code.
+                    if (UserScripts.isScriptUrl(request.url)) {
+                        offerExtension(url)
+                        return true
+                    }
                     val host = request.url.host?.lowercase()
                     // A site that sends its https page back to http has no secure version.
                     if (scheme == "http" && request.isRedirect && host != null && host == tab.upgradedHost) {
@@ -1686,7 +1831,12 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
                 tab.canBack = view.canGoBack()
                 tab.canForward = view.canGoForward()
                 injectPageStyles(tab)
-                if (!docStartScripts) view.evaluateJavascript(Scripts.MEDIA, null)
+                if (!docStartScripts) {
+                    view.evaluateJavascript(Scripts.MEDIA, null)
+                    if (!tab.ghost) extensions.filter { it.enabled && it.runsOn(url) }.forEach { view.evaluateJavascript(UserScripts.script(it), null) }
+                }
+                // Typed or opened straight in, a user script's code shows; offer to install it too.
+                if (UserScripts.isScriptUrl(Uri.parse(url)) && pendingExtension == null) offerExtension(url)
                 readThemeColor(tab)
                 recordVisit(tab, url, view.title ?: "")
                 if (tab.id == currentId) main.postDelayed({ captureThumbnail(tab) }, 600)

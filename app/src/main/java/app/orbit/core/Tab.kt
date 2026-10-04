@@ -56,6 +56,9 @@ class Tab(
     /** Document-start scripts that come and go with settings (YouTube ads, no WebRTC under the VPN). */
     var youtubeScript: ScriptHandler? = null
     var noRtcScript: ScriptHandler? = null
+    /** The extensions added to this tab's WebView, and which version of the list they came from. */
+    val extensionScripts = mutableListOf<ScriptHandler>()
+    var extensionsVersion = -1
     /** A load waiting for Orbit VPN's route to be in place. */
     var pendingUrl: String? = null
     /** The last link cleaned of tracking parameters, so a site that insists isn't sent round in circles. */

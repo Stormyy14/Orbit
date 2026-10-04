@@ -22,6 +22,11 @@ Google Play. That's where most browser-engine security fixes arrive. On top of W
   `WebMessageListener`s with narrow jobs: "Hide elements" (top frame of the current page, only
   while it's on), media controls (shown in the notification only), and Shields, which accepts a
   frame's class names and ids and only ever answers with CSS built from the filter lists.
+- **Extensions are only what you install.** A user script is fetched over https only (redirects
+  included), shown with the sites it will run on and a warning, and installed only when you
+  confirm. Scripts run inside the pages they match, with the same reach as the page and no access
+  to the app (no bridge to app code), and never in ghost tabs. Greasy Fork and Sleazy Fork are the
+  only sites told which extensions are installed (names and versions).
 - **Filter lists are treated as untrusted input.** They're downloaded over https, must look like
   filter lists, and are size-capped. Rules that run code (snippets, scriptlets) or rewrite
   requests are never used. Element-hiding selectors can't break out of their CSS rule (no braces,

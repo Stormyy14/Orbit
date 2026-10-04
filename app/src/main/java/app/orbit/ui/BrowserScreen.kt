@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.DesktopWindows
+import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.FindInPage
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.LocalFireDepartment
@@ -93,6 +94,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
     var pulseVoice by remember { mutableStateOf(false) }
     var deck by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<SheetKind?>(null) }
+    var adjustWallpaper by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val radial = remember {
@@ -104,7 +106,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
     LaunchedEffect(browser.launch) {
         val l = browser.launch ?: return@LaunchedEffect
         browser.launch = null
-        deck = false; sheet = null; pulse = false; browser.linkMenu = null; browser.reader = null
+        deck = false; sheet = null; pulse = false; adjustWallpaper = false; browser.linkMenu = null; browser.reader = null
         when (l) {
             Launch.SEARCH, Launch.VOICE -> { browser.blankTab(); pulseVoice = l == Launch.VOICE; pulse = true }
             Launch.NEW_TAB -> { browser.newTab(); pulseVoice = false; pulse = true }
@@ -114,7 +116,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
         }
     }
     LaunchedEffect(browser.externalOpens) {
-        if (browser.externalOpens > 0) { pulse = false; deck = false; sheet = null; browser.linkMenu = null; browser.reader = null }
+        if (browser.externalOpens > 0) { pulse = false; deck = false; sheet = null; adjustWallpaper = false; browser.linkMenu = null; browser.reader = null }
     }
 
     // Ghost tabs are kept out of screenshots, screen recordings and the recent-apps preview.
@@ -154,6 +156,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
             add(Command("Hide elements", "Remove parts of this page", Icons.Outlined.AutoFixHigh, "zap block remove") { browser.toggleZap() })
             add(Command("Focus", "Block distracting sites", Icons.Outlined.Timer, "flow pomodoro timer") { open(SheetKind.Flow) })
             add(Command("Shields", "Ad and tracker blocking", Icons.Outlined.Shield, "privacy block ads adblock trackers cookies") { open(SheetKind.Shields) })
+            add(Command("Extensions", "User scripts that change sites", Icons.Outlined.Extension, "extension addon add-on plugin userscript user script tampermonkey greasemonkey greasy fork") { open(SheetKind.Extensions) })
             add(Command("Orbit VPN", "Hide your IP address", Icons.Outlined.VpnLock, "vpn tor proxy ip location anonymous privacy") { open(SheetKind.Vpn) })
             add(Command("Spaces", "Switch or edit spaces", Icons.Outlined.Layers, "containers") { open(SheetKind.Spaces) })
             add(Command("Profiles", "Switch profile or sign in with Google", Icons.Outlined.AccountCircle, "account google sync login user") { open(SheetKind.Profiles) })
@@ -218,7 +221,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
         }
     }
 
-    val overlay = pulse || deck || browser.reader != null || browser.peek != null || radial.active || tab?.flowBlocked != null
+    val overlay = pulse || deck || adjustWallpaper || browser.reader != null || browser.peek != null || radial.active || tab?.flowBlocked != null
     val barTone = if (page && !overlay) topTint else Orb.Bg
     StatusBarIcons(light = barTone.luminance() > 0.55f, lightNav = !Orb.palette.dark)
 
@@ -254,7 +257,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
                 }
             }
 
-            val barVisible = !pulse && !deck && !browser.findOpen && browser.reader == null && !(imeVisible && page)
+            val barVisible = !pulse && !deck && !adjustWallpaper && !browser.findOpen && browser.reader == null && !(imeVisible && page)
             // Rebuilt when the bar moves, so its window-inset padding switches sides.
             key(barTop) {
                 AnimatedVisibility(
@@ -311,11 +314,14 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
 
             RadialOverlay(radial)
 
+            // Framing the wallpaper, full screen so it looks exactly as it will; back to Customize after.
+            if (adjustWallpaper) WallpaperEditor { adjustWallpaper = false; sheet = SheetKind.Customize }
+
             browser.customView?.let { FullscreenHost(it) }
 
             // Satellite stays on top, fullscreen games and videos included.
             AnimatedVisibility(
-                visible = browser.settings.satellite && !pulse && !deck && sheet == null && browser.reader == null &&
+                visible = browser.settings.satellite && !pulse && !deck && !adjustWallpaper && sheet == null && browser.reader == null &&
                     browser.peek == null && !radial.active && !browser.findOpen && !imeVisible && browser.linkMenu == null,
                 enter = fadeIn(tween(200)),
                 exit = fadeOut(tween(150)),
@@ -335,13 +341,15 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
                 onVpn = { sheet = SheetKind.Vpn },
             ) { sheet = null }
             SheetKind.Update -> UpdateSheet { sheet = null }
-            SheetKind.Customize -> CustomizeSheet { sheet = null }
+            SheetKind.Customize -> CustomizeSheet(onAdjustWallpaper = { sheet = null; adjustWallpaper = true }) { sheet = null }
             SheetKind.Trail -> TrailSheet(tab) { sheet = null }
             SheetKind.Profiles -> ProfilesSheet { sheet = null }
             SheetKind.QuickAdd -> QuickAddSheet { sheet = null }
             SheetKind.Satellite -> SatelliteSheet(onAddSites = { sheet = SheetKind.QuickAdd }) { sheet = null }
+            SheetKind.Extensions -> ExtensionsSheet(tab) { sheet = null }
             null -> Unit
         }
+        browser.pendingExtension?.let { e -> key(e) { ExtensionInstallSheet(e) { browser.pendingExtension = null } } }
         if (browser.linkMenu != null) LinkMenu { browser.linkMenu = null }
     }
 }

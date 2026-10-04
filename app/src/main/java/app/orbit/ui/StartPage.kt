@@ -122,11 +122,7 @@ fun StartPage(
     }
 
     Box(Modifier.fillMaxSize().background(Orb.Bg)) {
-        wallpaper?.let { img ->
-            Image(img, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            // Dimmed towards the canvas colour so text and icons stay readable.
-            Box(Modifier.fillMaxSize().background(Orb.Bg.copy(alpha = s.wallpaperDim / 100f)))
-        }
+        wallpaper?.let { WallpaperLayer(it, s) }
         Column(
             Modifier
                 .fillMaxSize()

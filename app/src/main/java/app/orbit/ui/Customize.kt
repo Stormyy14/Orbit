@@ -22,7 +22,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Crop
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Link
@@ -63,14 +65,15 @@ import app.orbit.core.ThemeMode
  * icon stay on this device).
  */
 @Composable
-fun CustomizeSheet(onDismiss: () -> Unit) {
+fun CustomizeSheet(onAdjustWallpaper: () -> Unit, onDismiss: () -> Unit) {
     val browser = LocalBrowser.current
     val context = LocalContext.current
     val haptics = rememberHaptics()
     val s = browser.settings
     fun set(n: Settings) = browser.updateSettings(n)
     val pickWallpaper = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        uri?.let(browser::setWallpaper)
+        // A new image goes straight to framing it.
+        uri?.let { browser.setWallpaper(it, onAdjustWallpaper) }
     }
     var icon by remember { mutableStateOf(runCatching { AppIcon.current(context) }.getOrDefault(AppIcon.CLASSIC)) }
     val inset = Modifier.padding(horizontal = 16.dp)
@@ -133,10 +136,17 @@ fun CustomizeSheet(onDismiss: () -> Unit) {
                 },
             ) { pickImage(pickWallpaper) }
             if (s.wallpaper != 0L) {
-                Label("Dim the wallpaper")
-                Segmented(listOf(30, 50, 70), listOf(30, 50, 70).minBy { kotlin.math.abs(it - s.wallpaperDim) }, inset, label = { when (it) { 30 -> "Light"; 50 -> "Medium"; else -> "Strong" } }) {
-                    set(s.copy(wallpaperDim = it))
-                }
+                ListRow(
+                    "Adjust wallpaper",
+                    subtitle = buildList {
+                        add(if (s.wallpaperFit) "Whole image" else "Fills the screen")
+                        if (s.wallpaperZoom > 1.01f) add("zoomed")
+                        add("dim " + dimLabel(s.wallpaperDim).lowercase())
+                        if (CanBlur && s.wallpaperBlur > 0) add("blur " + blurLabel(s.wallpaperBlur).lowercase())
+                    }.joinToString(" · "),
+                    icon = Icons.Outlined.Crop,
+                    trailing = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = Orb.Text3, modifier = Modifier.size(20.dp)) },
+                ) { haptics.tick(); onAdjustWallpaper() }
             }
 
             Heading("Address bar")

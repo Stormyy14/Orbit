@@ -42,6 +42,7 @@ import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Cookie
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.DesktopWindows
 import androidx.compose.material.icons.outlined.Download
@@ -102,7 +103,7 @@ import app.orbit.core.UserProfile
 import java.text.DateFormat
 import java.util.Date
 
-enum class SheetKind { Menu, Shields, Vpn, Spaces, Flow, Settings, Trail, Profiles, QuickAdd, Satellite, Customize, Update }
+enum class SheetKind { Menu, Shields, Vpn, Spaces, Flow, Settings, Trail, Profiles, QuickAdd, Satellite, Customize, Update, Extensions }
 
 private val Flat = RoundedCornerShape(0.dp)
 
@@ -147,6 +148,11 @@ fun PageMenu(tab: Tab?, open: (SheetKind) -> Unit, onDismiss: () -> Unit) {
                 meta = if (!page) null else if (browser.shieldsOn(tab)) "${tab?.blockedCount ?: 0} blocked" else "Off",
             ) { act { open(SheetKind.Shields) } }
             MenuRow(Icons.Outlined.VpnLock, "Orbit VPN", meta = vpnMeta()) { act { open(SheetKind.Vpn) } }
+            MenuRow(
+                Icons.Outlined.Extension, "Extensions",
+                meta = browser.extensionsOn(tab).size.takeIf { it > 0 }?.let { "$it on this page" }
+                    ?: browser.extensions.size.takeIf { it > 0 }?.toString(),
+            ) { act { open(SheetKind.Extensions) } }
             MenuRow(
                 Icons.Outlined.Timer, "Focus",
                 meta = if (browser.flowActive) "until " + DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(browser.flowUntil)) else null,

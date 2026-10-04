@@ -154,14 +154,29 @@ data class Settings(
     val wallpaper: Long = 0L,
     /** How much the wallpaper is dimmed under the start page, in percent. */
     val wallpaperDim: Int = 50,
+    /** Show the whole image (bars around it) instead of filling the screen. */
+    val wallpaperFit: Boolean = false,
+    /** Zoom on top of filling (or fitting) the screen; 1 = none. */
+    val wallpaperZoom: Float = 1f,
+    /** The point of the image kept at the centre of the screen, as fractions of its width and height. */
+    val wallpaperX: Float = 0.5f,
+    val wallpaperY: Float = 0.5f,
+    /** Blur radius in dp (Android 12 and newer). */
+    val wallpaperBlur: Int = 0,
 ) {
+    /** How the wallpaper is framed: kept with the image on this device, never synced. */
+    fun withWallpaperOf(o: Settings) = copy(
+        wallpaper = o.wallpaper, wallpaperFit = o.wallpaperFit, wallpaperZoom = o.wallpaperZoom,
+        wallpaperX = o.wallpaperX, wallpaperY = o.wallpaperY,
+    )
+
     /** The same settings with every customization back to its default. */
     fun withDefaultLook(): Settings {
         val d = Settings()
         return copy(
             theme = d.theme, accent = d.accent, corners = d.corners, font = d.font, textScale = d.textScale,
             pageZoom = d.pageZoom, barTop = d.barTop, fullAddress = d.fullAddress, showClock = d.showClock,
-            showSearch = d.showSearch, showOrbit = d.showOrbit, showRecent = d.showRecent, wallpaperDim = d.wallpaperDim,
+            showSearch = d.showSearch, showOrbit = d.showOrbit, showRecent = d.showRecent, wallpaperDim = d.wallpaperDim, wallpaperBlur = d.wallpaperBlur,
             darkPages = d.darkPages, collapseOnScroll = d.collapseOnScroll,
         )
     }
@@ -199,6 +214,11 @@ data class Settings(
         .put("recent", showRecent)
         .put("wallpaper", wallpaper)
         .put("wallpaperDim", wallpaperDim)
+        .put("wallpaperFit", wallpaperFit)
+        .put("wallpaperZoom", wallpaperZoom.toDouble())
+        .put("wallpaperX", wallpaperX.toDouble())
+        .put("wallpaperY", wallpaperY.toDouble())
+        .put("wallpaperBlur", wallpaperBlur)
 
     companion object {
         /** 2: Google became the default engine; older files get it once. */
@@ -240,6 +260,11 @@ data class Settings(
                 showRecent = o.optBoolean("recent", d.showRecent),
                 wallpaper = o.optLong("wallpaper", d.wallpaper),
                 wallpaperDim = o.optInt("wallpaperDim", d.wallpaperDim).coerceIn(0, 90),
+                wallpaperFit = o.optBoolean("wallpaperFit", d.wallpaperFit),
+                wallpaperZoom = o.optDouble("wallpaperZoom", d.wallpaperZoom.toDouble()).toFloat().coerceIn(1f, 5f),
+                wallpaperX = o.optDouble("wallpaperX", d.wallpaperX.toDouble()).toFloat().coerceIn(0f, 1f),
+                wallpaperY = o.optDouble("wallpaperY", d.wallpaperY.toDouble()).toFloat().coerceIn(0f, 1f),
+                wallpaperBlur = o.optInt("wallpaperBlur", d.wallpaperBlur).coerceIn(0, 40),
             )
         }
 

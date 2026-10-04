@@ -1,6 +1,6 @@
 # Privacy policy
 
-_Last updated: 3 October 2026 (Shields filter lists, Orbit VPN)_
+_Last updated: 4 October 2026 (extensions)_
 
 Orbit is a web browser. It has **no analytics, no ads, no crash reporting and no servers
 of its own**. The developer receives no data from the app. Accounts are optional: you can add a
@@ -17,6 +17,8 @@ backup and device-to-device transfer:
 - If you add Orbit's home-screen widgets: the active profile's favorite sites (address and name)
   and whether Orbit VPN is on, so the widgets can show them. Favorites appear on your home screen.
 - Cached site icons
+- The extensions you install (their code and whether each is on). What an extension saves for a
+  site is kept in that site's storage, like any site data.
 - Cookies and site data, managed by Android System WebView
 
 Ghost tabs are never written to history or restored, and their cookies and site data are deleted
@@ -39,6 +41,9 @@ Settings → Data, or uninstall the app to remove everything.
 | You open Reader view | The page's image hosts | Requests for the article's images. |
 | Orbit checks for updates (every few hours, or when you ask; can be turned off in Settings) | GitHub (`api.github.com`) | A request for the latest Orbit release. Nothing about you or your browsing is sent. |
 | You tap Update | GitHub (`github.com` and its download servers) | A download of the new Orbit APK and its checksum. |
+| You install an extension (from a `.user.js` link or a link you paste) | The server the link points to (usually Greasy Fork) | A download of the script and any libraries it lists (`@require`), over https only, through Orbit VPN when it's on. No cookies are sent. |
+| You visit Greasy Fork or Sleazy Fork | That site | So its Install button works, the page can ask Orbit whether a script is installed, and gets the names and versions of the extensions you have (as with Violentmonkey). |
+| An extension runs | Whatever the extension's code contacts | Extensions run inside the pages they match and can read and change them, and make the requests those pages could. Orbit shows which sites each one runs on before you install it. |
 | You download a file | The file's server, via Android's Download Manager | The download request. |
 | Safe Browsing check | Google, via Android System WebView | WebView's built-in Safe Browsing uses partial URL hashes to warn about known dangerous sites. |
 

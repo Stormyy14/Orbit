@@ -2,6 +2,15 @@ package app.orbit.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.ui.composed
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import kotlinx.coroutines.delay
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -87,10 +96,12 @@ fun Deck(onClose: () -> Unit, onSpaces: () -> Unit) {
     val pager = rememberPagerState(initialPage = startPage) { spaces.size + 1 }
 
     LaunchedEffect(Unit) { browser.current?.let(browser::captureThumbnail) }
-    /** The site group being looked at: (page, site). */
-    var openGroup by remember { mutableStateOf<Pair<Int, String>?>(null) }
-    BackHandler(enabled = openGroup != null) { openGroup = null }
-    LaunchedEffect(pager.currentPage) { if (openGroup?.first != pager.currentPage) openGroup = null }
+    /** The site group being looked at, and where its stack sat in the grid. */
+    var openGroup by remember { mutableStateOf<OpenGroup?>(null) }
+    /** True while an open group's tabs gather back into their stack. */
+    var closingGroup by remember { mutableStateOf(false) }
+    BackHandler(enabled = openGroup != null) { closingGroup = true }
+    LaunchedEffect(pager.currentPage) { if (openGroup?.page != pager.currentPage) { openGroup = null; closingGroup = false } }
 
     Column(Modifier.fillMaxSize().background(Orb.Bg).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -119,15 +130,17 @@ fun Deck(onClose: () -> Unit, onSpaces: () -> Unit) {
             val list = if (ghost) browser.ghostTabs else browser.tabsIn(spaces[page].id)
             val entries = deckEntries(list)
             // An open group whose tabs have gone back to one (or none) closes by itself.
-            val group = openGroup?.takeIf { it.first == page }?.let { (_, site) ->
-                entries.firstOrNull { it.site == site && it.tabs.size > 1 }
-            }
+            val open = openGroup?.takeIf { it.page == page }
+            val group = open?.let { o -> entries.firstOrNull { it.site == o.site && it.tabs.size > 1 } }
             if (list.isEmpty()) {
                 EmptyDeck(ghost)
             } else if (group != null) {
                 SiteGroup(
                     group,
-                    onBack = { openGroup = null },
+                    origin = open!!.origin,
+                    closing = closingGroup,
+                    onBack = { closingGroup = true },
+                    onClosed = { openGroup = null; closingGroup = false },
                     onOpen = { t -> haptics.confirm(); browser.select(t); onClose() },
                     onCloseTab = { t -> haptics.tick(); browser.closeTab(t) },
                     onCloseAll = { haptics.heavy(); group.tabs.forEach { browser.closeTab(it, undoable = false) }; openGroup = null },
@@ -146,7 +159,7 @@ fun Deck(onClose: () -> Unit, onSpaces: () -> Unit) {
                                 e,
                                 current = e.tabs.any { it.id == browser.currentId },
                                 modifier = Modifier.animateItem(),
-                                onOpen = { haptics.tick(); openGroup = page to e.site!! },
+                                onOpen = { at -> haptics.tick(); closingGroup = false; openGroup = OpenGroup(page, e.site!!, at) },
                                 onCloseAll = { haptics.heavy(); e.tabs.forEach { browser.closeTab(it, undoable = false) } },
                             )
                         } else {
@@ -194,6 +207,9 @@ fun Deck(onClose: () -> Unit, onSpaces: () -> Unit) {
     }
 }
 
+/** A site group opened from the Deck: its page, its site, and the centre of its stack on screen. */
+private class OpenGroup(val page: Int, val site: String, val origin: Offset)
+
 /** A card in the Deck: one tab, or every tab open on the same site. */
 private class DeckEntry(val site: String?, val tabs: List<Tab>) {
     val key: String get() = if (tabs.size > 1) "site:$site" else tabs[0].id
@@ -220,13 +236,14 @@ private fun deckEntries(tabs: List<Tab>): List<DeckEntry> {
 
 /** A stack of tabs on one site: the most recent one on top, the count beside the name. */
 @Composable
-private fun GroupCard(entry: DeckEntry, current: Boolean, modifier: Modifier, onOpen: () -> Unit, onCloseAll: () -> Unit) {
+private fun GroupCard(entry: DeckEntry, current: Boolean, modifier: Modifier, onOpen: (Offset) -> Unit, onCloseAll: () -> Unit) {
     val haptics = rememberHaptics()
     val top = entry.tabs.maxByOrNull { it.lastActive } ?: entry.tabs[0]
     val shape = R12
     var menu by remember { mutableStateOf(false) }
     val name = remember(top.title, top.url) { Url.siteName(top.title, top.url) }
-    Box(modifier.fillMaxWidth().aspectRatio(0.72f)) {
+    var center by remember { mutableStateOf(Offset.Zero) }
+    Box(modifier.fillMaxWidth().aspectRatio(0.72f).onGloballyPositioned { center = it.boundsInRoot().center }) {
         // The cards underneath peek out at the top, so it reads as a pile of tabs.
         Box(Modifier.fillMaxSize().padding(horizontal = 12.dp).clip(shape).background(Orb.Field).border(1.dp, Orb.Border, shape))
         Box(Modifier.fillMaxSize().padding(start = 6.dp, end = 6.dp, top = 5.dp).clip(shape).background(Orb.Surface).border(1.dp, Orb.Border, shape))
@@ -237,7 +254,7 @@ private fun GroupCard(entry: DeckEntry, current: Boolean, modifier: Modifier, on
                 .clip(shape)
                 .background(Orb.Surface)
                 .border(if (current) 1.5.dp else 1.dp, if (current) Orb.Text else Orb.Border, shape)
-                .tap(shape, onLongClick = { haptics.heavy(); menu = true }) { onOpen() },
+                .tap(shape, onLongClick = { haptics.heavy(); menu = true }) { onOpen(center) },
         ) {
             Row(Modifier.fillMaxWidth().height(40.dp).padding(start = 10.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 SiteIcon(top.url, 18.dp, top.favicon)
@@ -262,19 +279,44 @@ private fun GroupCard(entry: DeckEntry, current: Boolean, modifier: Modifier, on
             }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Orb.Surface) {
-            DropdownMenuItem(text = { Text("Show ${entry.tabs.size} tabs") }, onClick = { menu = false; onOpen() })
+            DropdownMenuItem(text = { Text("Show ${entry.tabs.size} tabs") }, onClick = { menu = false; onOpen(center) })
             DropdownMenuItem(text = { Text("Close ${entry.tabs.size} tabs", color = Orb.Red) }, onClick = { menu = false; onCloseAll() })
         }
     }
 }
 
-/** Every tab open on one site, with a way back and a way to close them all. */
+/**
+ * Every tab open on one site, with a way back and a way to close them all. Opening deals the tabs
+ * out of the stack at [origin] into the grid; [closing] gathers them back, then [onClosed].
+ */
 @Composable
-private fun SiteGroup(entry: DeckEntry, onBack: () -> Unit, onOpen: (Tab) -> Unit, onCloseTab: (Tab) -> Unit, onCloseAll: () -> Unit) {
+private fun SiteGroup(
+    entry: DeckEntry,
+    origin: Offset,
+    closing: Boolean,
+    onBack: () -> Unit,
+    onClosed: () -> Unit,
+    onOpen: (Tab) -> Unit,
+    onCloseTab: (Tab) -> Unit,
+    onCloseAll: () -> Unit,
+) {
     val browser = LocalBrowser.current
     val first = entry.tabs[0]
+    val openedAt = remember { System.currentTimeMillis() }
+    val header = remember { Animatable(0f) }
+    LaunchedEffect(closing) {
+        if (!closing) header.animateTo(1f, tween(220, easing = FastOutSlowInEasing))
+        else {
+            header.animateTo(0f, tween(GatherMs, easing = FastOutLinearInEasing))
+            onClosed()
+        }
+    }
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 4.dp)
+                .graphicsLayer { alpha = header.value; translationY = (1f - header.value) * -12.dp.toPx() },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             IconButton(Icons.AutoMirrored.Outlined.ArrowBack, "All tabs") { onBack() }
             SiteIcon(first.url, 20.dp, first.favicon)
             Spacer(Modifier.width(10.dp))
@@ -295,17 +337,59 @@ private fun SiteGroup(entry: DeckEntry, onBack: () -> Unit, onOpen: (Tab) -> Uni
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
-            items(entry.tabs, key = { it.id }) { t ->
+            itemsIndexed(entry.tabs, key = { _, t -> t.id }) { i, t ->
                 TabCard(
                     t,
                     current = t.id == browser.currentId,
-                    modifier = Modifier.animateItem(),
+                    modifier = Modifier.animateItem().dealtFrom(origin, i, openedAt, closing),
                     onOpen = { onOpen(t) },
                     onClose = { onCloseTab(t) },
                 )
             }
         }
     }
+}
+
+/** How long the tabs take to gather back into their stack. */
+private const val GatherMs = 170
+
+/**
+ * A tab dealt out of its group's stack: it starts small and tilted on the stack at [origin] and
+ * springs to its place in the grid a beat after the one before. Tabs scrolled into view later
+ * are simply there. With [closing], it flies back onto the stack.
+ */
+private fun Modifier.dealtFrom(origin: Offset, index: Int, openedAt: Long, closing: Boolean): Modifier = composed {
+    val p = remember { Animatable(0f) }
+    var home by remember { mutableStateOf<Offset?>(null) }
+    val placed = home != null
+    LaunchedEffect(placed, closing) {
+        if (!placed) return@LaunchedEffect
+        if (closing) {
+            p.animateTo(0f, tween(GatherMs, easing = FastOutLinearInEasing))
+        } else if (System.currentTimeMillis() - openedAt > 400) {
+            p.snapTo(1f)
+        } else {
+            delay(32L * index.coerceAtMost(8))
+            p.animateTo(1f, spring(dampingRatio = 0.72f, stiffness = 380f))
+        }
+    }
+    this
+        .onGloballyPositioned { if (home == null) home = it.boundsInRoot().center }
+        .zIndex(if (p.value < 1f) 1f - index * 0.01f else 0f)
+        .graphicsLayer {
+            val h = home
+            if (h == null) { alpha = 0f; return@graphicsLayer }
+            val v = p.value
+            val rest = 1f - v
+            translationX = (origin.x - h.x) * rest
+            translationY = (origin.y - h.y) * rest
+            val sc = 0.62f + 0.38f * v
+            scaleX = sc; scaleY = sc
+            // Fanned a little on the stack, as if picked off a pile.
+            rotationZ = (if (index % 2 == 0) -6f else 5f) * rest * (1 + index % 3) / 2f
+            // Only the top of the pile shows before it's dealt.
+            alpha = if (index < 3) 1f else v.coerceIn(0f, 1f)
+        }
 }
 
 @Composable

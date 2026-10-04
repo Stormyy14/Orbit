@@ -61,6 +61,7 @@ import app.orbit.core.Browser
 import app.orbit.core.Url
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.lerp
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -94,6 +95,8 @@ fun Satellite(onEdit: () -> Unit) {
 
     var open by remember { mutableStateOf(false) }
     val progress = remember { Animatable(0f) }
+    /** The half orbit's spin as it opens: 0 = just starting to whirl, 1 = settled. */
+    val spin = remember { Animatable(1f) }
     val nodes = remember { List(Browser.SATELLITE_SIZE) { Animatable(0f) } }
     var left by remember(s.satelliteLeft) { mutableStateOf(s.satelliteLeft) }
     var y by remember(s.satelliteY) { mutableFloatStateOf(s.satelliteY) }
@@ -108,6 +111,8 @@ fun Satellite(onEdit: () -> Unit) {
     LaunchedEffect(open) {
         if (open) {
             launch { progress.animateTo(1f, tween(150, easing = FastOutSlowInEasing)) }
+            // The half orbit whirls round the handle and settles, a moon riding its end.
+            launch { spin.snapTo(0f); spin.animateTo(1f, tween(560, easing = FastOutSlowInEasing)) }
             // Each site pops out a beat after the one before, overshooting a little.
             nodes.forEachIndexed { i, a ->
                 launch { delay(18L * i); a.animateTo(1f, spring(dampingRatio = 0.62f, stiffness = 1100f)) }
@@ -173,18 +178,36 @@ fun Satellite(onEdit: () -> Unit) {
                     radius = radius * 1.45f,
                     center = Offset(edge, cy),
                 )
-                // The orbit draws itself from the top, following the sites as they swing out.
-                listOf(1f to 1f, 0.55f to 0.5f).forEach { (scale, a) ->
+                // The orbit draws itself from the top while both rings spin into place, the inner
+                // one the other way round, like the Orbit mark loading.
+                val turn = (1f - spin.value) * 540f
+                listOf(Triple(1f, 1f, 1f), Triple(0.55f, 0.5f, -0.7f)).forEach { (scale, a, way) ->
                     val r = radius * scale
+                    val start = -90f - turn * way * dir
+                    val sweep = 180f * pc * dir
+                    // Bold while it whirls, easing back to a hairline as it settles.
+                    val whirl = 1f - spin.value
                     drawArc(
-                        ring.copy(alpha = a * pc),
-                        startAngle = -90f,
-                        sweepAngle = 180f * pc * dir,
+                        lerp(ring, glow, whirl * 0.85f).copy(alpha = a * pc),
+                        startAngle = start,
+                        sweepAngle = sweep,
                         useCenter = false,
                         topLeft = Offset(edge - r, cy - r),
                         size = Size(r * 2, r * 2),
-                        style = Stroke(1.dp.toPx(), cap = StrokeCap.Round),
+                        style = Stroke((1f + 2f * whirl).dp.toPx(), cap = StrokeCap.Round),
                     )
+                    if (way > 0f) {
+                        val sv = spin.value
+                        val moonAlpha = pc * (1f - sv * sv * sv * sv)
+                        if (moonAlpha > 0.01f) {
+                            val m = Math.toRadians((start + sweep).toDouble())
+                            drawCircle(
+                                glow.copy(alpha = moonAlpha),
+                                radius = 5.dp.toPx(),
+                                center = Offset(edge + r * cos(m).toFloat(), cy + r * sin(m).toFloat()),
+                            )
+                        }
+                    }
                 }
             }
         }
