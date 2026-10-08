@@ -816,6 +816,9 @@ fun SettingsSheet(onCustomize: () -> Unit, onUpdate: () -> Unit, onShields: () -
                 set(s.copy(backgroundPlay = it))
                 if (!it) browser.stopMedia()
             }
+            ToggleRow("Open links in apps", "LinkedIn, Spotify and other sites open in their app when it's installed", s.openInApps, Icons.AutoMirrored.Outlined.OpenInNew) {
+                set(s.copy(openInApps = it))
+            }
             ToggleRow("Desktop sites", null, s.desktopDefault, Icons.Outlined.DesktopWindows) { set(s.copy(desktopDefault = it)) }
             ToggleRow("Vibration", null, s.haptics, Icons.Outlined.Vibration) { set(s.copy(haptics = it)) }
             Heading("Data")

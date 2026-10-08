@@ -39,12 +39,14 @@ Settings → Data, or uninstall the app to remove everything.
 | You search | The search engine you chose in Settings | Your search, as on any browser. |
 | The start page shows a site you haven't visited yet | That site | A request for its icon (`/apple-touch-icon.png` or `/favicon.ico`). |
 | You open Reader view | The page's image hosts | Requests for the article's images. |
+| You open Reader view on a page that shows little text or a paywall | The page's website, and the Internet Archive (`archive.org`) | The page is fetched again without cookies, once as a normal browser and once as Google's search crawler, and the Internet Archive is asked for its latest copy of the page (it receives the page's address). Through Orbit VPN when it's on. |
+| You tap a link to a site whose app is on your phone (not in ghost tabs; can be turned off in Settings) | That app | The link, handed over by Android, as other browsers do. |
 | Orbit checks for updates (every few hours, or when you ask; can be turned off in Settings) | GitHub (`api.github.com`) | A request for the latest Orbit release. Nothing about you or your browsing is sent. |
 | You tap Update | GitHub (`github.com` and its download servers) | A download of the new Orbit APK and its checksum. |
 | You install an extension (from a `.user.js` link or a link you paste) | The server the link points to (usually Greasy Fork) | A download of the script and any libraries it lists (`@require`), over https only, through Orbit VPN when it's on. No cookies are sent. |
 | You visit Greasy Fork or Sleazy Fork | That site | So its Install button works, the page can ask Orbit whether a script is installed, and gets the names and versions of the extensions you have (as with Violentmonkey). |
 | An extension runs | Whatever the extension's code contacts | Extensions run inside the pages they match and can read and change them, and make the requests those pages could. Orbit shows which sites each one runs on before you install it. |
-| You download a file | The file's server, via Android's Download Manager | The download request. |
+| You download a file | The file's server, via Android's Download Manager | The download request, with the site's cookies for that server and the address of the page you downloaded it from, as browsers send. Files a page makes itself (`blob:` and `data:` links) are saved straight from the page, with no request. |
 | Safe Browsing check | Google, via Android System WebView | WebView's built-in Safe Browsing uses partial URL hashes to warn about known dangerous sites. |
 
 Orbit also asks Android System WebView not to send its usage metrics.

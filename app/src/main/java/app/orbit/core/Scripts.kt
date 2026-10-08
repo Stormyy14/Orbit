@@ -32,36 +32,79 @@ var top=document.elementFromPoint(innerWidth/2,4);
 return bg(top)||bg(document.body)||bg(document.documentElement)||'';
 }catch(e){return ''}})()"""
 
-    /** Readability-lite: finds the densest text container and flattens it into blocks. */
-    const val READER = """
-(function(){try{
-function ptext(el){var s=0,ps=el.querySelectorAll('p');for(var j=0;j<ps.length;j++){var t=ps[j].textContent||'';if(t.length>50)s+=t.length;}return s;}
-var total=ptext(document.body),best=null;
-var pref=['[itemprop=articleBody]','.mw-parser-output','#mw-content-text','article','main','[role=main]','.post-content','.entry-content','.article-body','.story-body','#content'];
-for(var i=0;i<pref.length&&!best;i++){var el=document.querySelector(pref[i]);if(el&&ptext(el)>=total*0.6)best=el;}
-if(!best){var sc=new Map(),ps=document.querySelectorAll('p');
-for(var j=0;j<ps.length;j++){var t=(ps[j].textContent||'').length;if(t<50)continue;var p=ps[j].parentElement;if(!p)continue;
+    /**
+     * Readability-lite: finds the densest text container of document D and flattens it into
+     * blocks. Uses the article text that news sites put in their structured data (for search
+     * engines) when it is longer than what the page shows, and reports signs of a paywall.
+     */
+    private const val READER_FN = """
+function(D,live,U){
+var BAD='nav,footer,aside,form,[role=navigation],[role=complementary],.comments,.related,.share,.social,.newsletter,.ad,.advert,[class*=share-],[class*=-share],[class*=sharing],[class*=social-]';
+var WALL='[class*=paywall],[id*=paywall],[class*=Paywall],[class*=piano],[id*=piano],.tp-modal,[class*=regwall],[class*=subscribe-wall],[class*=subscription-wall],[class*=premium-wall],[class*=meter-wall]';
+var NAG=/subscri|sign in|log in|already a member|continue reading|register|assin|subscrev|inicie sess|suscr/i;
+var STOP=/continue reading|keep reading|subscribe (now|today|to)|already (a )?subscriber|continuar a ler|já (é )?assinante|assine (o|a|j)|seguir leyendo|suscríbete|weiterlesen|jetzt abonnieren|continuer à lire|abonnez-vous/i;
+var body=D.body;if(!body)return JSON.stringify({error:'empty'});
+function tx(e){return ((live&&e.innerText)||e.textContent||'').trim();}
+function leaf(e){return e.tagName==='DIV'&&!e.querySelector('p,div,ul,ol,table,h1,h2,h3,h4,section,article,figure,blockquote,pre')&&(e.textContent||'').trim().length>=80;}
+var P=[].slice.call(body.querySelectorAll('p'));
+if(P.length<4){var dv=body.querySelectorAll('div');for(var i=0;i<dv.length&&i<6000;i++)if(leaf(dv[i]))P.push(dv[i]);}
+var L=P.map(function(p){return (p.textContent||'').length;});
+function ptext(el){var s=0;for(var j=0;j<P.length;j++)if(L[j]>50&&el.contains(P[j]))s+=L[j];return s;}
+var total=ptext(body),best=null;
+var pref=['[itemprop=articleBody]','.mw-parser-output','#mw-content-text','article','main','[role=main]','.post-content','.entry-content','.article-body','.article-content','.story-body','.story-content','#content'];
+for(var i=0;i<pref.length&&!best;i++){var el=D.querySelector(pref[i]);if(el&&ptext(el)>=total*0.6)best=el;}
+if(!best){var sc=new Map();
+for(var j=0;j<P.length;j++){var t=L[j];if(t<50)continue;var p=P[j].parentElement;if(!p)continue;
 sc.set(p,(sc.get(p)||0)+t);if(p.parentElement)sc.set(p.parentElement,(sc.get(p.parentElement)||0)+t/2);}
 var bs=0;sc.forEach(function(v,k){if(v>bs){bs=v;best=k;}});
-while(best&&best.parentElement&&best!==document.body&&ptext(best)<total*0.7&&ptext(best.parentElement)>=total*0.7)best=best.parentElement;}
-if(!best)best=document.body;
-var out=[],words=0;var nodes=best.querySelectorAll('h1,h2,h3,h4,p,li,blockquote,pre,img,figcaption');
+while(best&&best.parentElement&&best!==body&&ptext(best)<total*0.7&&ptext(best.parentElement)>=total*0.7)best=best.parentElement;}
+if(!best)best=body;
+var out=[],words=0,pw=0;var nodes=best.querySelectorAll('h1,h2,h3,h4,p,li,blockquote,pre,img,figcaption,div');
 for(var k=0;k<nodes.length&&out.length<800;k++){var n=nodes[k];
-if(n.closest('nav,footer,aside,form,[role=navigation],[role=complementary],.comments,.related,.share,.social,.newsletter,.ad,.advert'))continue;
 var tag=n.tagName.toLowerCase();
-if(tag==='img'){var src=n.currentSrc||n.src;var w=n.naturalWidth||n.width;if(src&&src.indexOf('http')===0&&w>240)out.push({t:'img',v:src});continue;}
+if(tag==='div'&&!leaf(n))continue;
+if(n.closest(BAD))continue;
+if(tag==='img'){var src=n.getAttribute('data-src')||n.currentSrc||n.src;var w=n.naturalWidth||+n.getAttribute('width')||(live?0:999);
+if(src&&src.indexOf('http')===0&&w>240)out.push({t:'img',v:src});continue;}
 if(n.parentElement&&n.parentElement.closest('li,blockquote,pre')&&tag!=='pre')continue;
-var txt=(n.innerText||n.textContent||'').trim();if(!txt)continue;
+var txt=tx(n);if(!txt)continue;
 if(tag==='li'&&txt.length<2)continue;
-words+=txt.split(/\s+/).length;out.push({t:tag,v:txt});}
-function meta(s){var e=document.querySelector(s);return e?(e.content||''):'';}
-var h1=document.querySelector('h1'),h=h1?(h1.innerText||'').trim():'';
-var title=(h.length>3&&document.title.indexOf(h)>=0)?h:(meta('meta[property="og:title"]')||document.title);
+if(txt.length<600&&(n.closest(WALL)?NAG.test(txt):STOP.test(txt)))continue;
+if(tag==='div')tag='p';
+var c=txt.split(/\s+/).length;words+=c;if(tag==='p')pw+=c;out.push({t:tag,v:txt});}
+var lb='',locked=false,ss=D.querySelectorAll('script[type="application/ld+json"]');
+function walk(o,d){if(!o||typeof o!=='object'||d>6)return;
+if(Array.isArray(o)){for(var i=0;i<o.length;i++)walk(o[i],d+1);return;}
+if(typeof o.articleBody==='string'&&o.articleBody.length>lb.length)lb=o.articleBody;
+var f=o.isAccessibleForFree;if(f===false||f==='False'||f==='false')locked=true;
+for(var q in o)if(o[q]&&typeof o[q]==='object')walk(o[q],d+1);}
+for(var i=0;i<ss.length;i++){try{walk(JSON.parse(ss[i].textContent),0);}catch(e){}}
+if(lb){lb=lb.replace(/<br\s*\/?>|<\/(p|h\d|li|div|blockquote)>/gi,'\n');
+try{lb=new DOMParser().parseFromString(lb,'text/html').body.textContent||'';}catch(e){}
+var ps=lb.split(/\n+/).map(function(s){return s.trim();}).filter(function(s){return s.length>0;});
+if(ps.length<3&&lb.length>1200){ps=[];var cur='',sn=lb.match(/[^.!?]+[.!?]+["'\u201d\u2019)]*\s*|[^.!?]+$/g)||[lb];
+for(var i=0;i<sn.length;i++){cur+=sn[i];if(cur.length>500){ps.push(cur.trim());cur='';}}if(cur.trim())ps.push(cur.trim());}
+var lw=0;for(var i=0;i<ps.length;i++)lw+=ps[i].split(/\s+/).length;
+if(lw>pw*1.25+50){var keep=[];for(var i=0;i<out.length;i++){var b=out[i];if(b.t==='p')break;keep.push(b);}
+out=keep.concat(ps.map(function(s){return {t:'p',v:s};}));words=words-pw+lw;pw=lw;}}
+function meta(s){var e=D.querySelector(s);return e?(e.getAttribute('content')||''):'';}
+var tier=meta('meta[property="article:content_tier"]').toLowerCase();
+var wall=locked||tier==='locked'||tier==='metered'||!!D.querySelector(WALL);
+var og=meta('meta[property="og:title"]'),sn=meta('meta[property="og:site_name"]').toLowerCase(),title='',hs=D.querySelectorAll('h1');
+for(var i=0;i<hs.length&&!title;i++){var h=tx(hs[i]);if(h.length>3&&h.toLowerCase()!==sn&&(D.title.indexOf(h)>=0||og.indexOf(h)>=0)&&h!==D.title.trim())title=h;}
+if(!title)title=og||D.title;
 return JSON.stringify({title:title,
 byline:meta('meta[name="author"]')||meta('meta[property="article:author"]'),
-site:meta('meta[property="og:site_name"]')||location.hostname,
-hero:meta('meta[property="og:image"]'),words:words,blocks:out});
-}catch(e){return JSON.stringify({error:String(e)})}})()"""
+site:meta('meta[property="og:site_name"]')||(U.match(/^https?:\/\/([^\/?#]+)/)||[])[1]||'',
+hero:meta('meta[property="og:image"]'),words:words,text:pw,paywall:wall,blocks:out});
+}"""
+
+    const val READER = "(function(){try{return ($READER_FN)(document,true,location.href);}catch(e){return JSON.stringify({error:String(e)})}})()"
+
+    /** [READER] on fetched [html], parsed inertly (no scripts run, nothing loads). */
+    fun readerOf(html: String, url: String) =
+        "(function(){try{var D=new DOMParser().parseFromString(${JSONObject.quote(html)},'text/html');" +
+            "return ($READER_FN)(D,false,${JSONObject.quote(url)});}catch(e){return JSON.stringify({error:String(e)})}})()"
 
     /** Zap mode: tap any element to hide it on this site forever. Posts the selector to OrbitBridge. */
     const val ZAP_ON = """

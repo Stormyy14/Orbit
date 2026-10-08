@@ -49,6 +49,10 @@ class Tab(
 
     @Volatile
     var pageHost: String? = Url.host(url)
+    /** Opened for a link from another app (so a download from it can close it again). */
+    var fromOutside = false
+    /** When a tap last started a navigation here, so the redirects it causes count as tapped too. */
+    var gestureAt = 0L
     /** Page-wide filter exceptions for the page shown (see [Shields.pageFlags]). */
     @Volatile
     var shieldFlags: Int = 0

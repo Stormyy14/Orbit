@@ -11,7 +11,9 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.Uri
 import android.net.http.SslError
+import android.os.Build
 import android.os.Bundle
+import android.util.Base64
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
@@ -23,7 +25,7 @@ import android.webkit.GeolocationPermissions
 import android.webkit.MimeTypeMap
 import android.webkit.PermissionRequest
 import android.webkit.SslErrorHandler
-import android.webkit.URLUtil
+
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -57,9 +59,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -149,6 +156,8 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     val flowActive: Boolean get() = now < flowUntil
 
     var barCollapsed by mutableStateOf(false)
+    /** The page in the current tab is scrolled to its end, so it moves up clear of the bar. */
+    var pageAtEnd by mutableStateOf(false)
     var notice by mutableStateOf<Notice?>(null)
         private set
     var peek by mutableStateOf<Tab?>(null)
@@ -527,6 +536,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         if (!tab.showHome) ensureWebView(tab)
         tab.webView?.onResume()
         barCollapsed = false
+        pageAtEnd = false
         findOpen = false
         hibernateIdle()
         saveSession()
@@ -1105,12 +1115,50 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         tab.webView?.reload()
     }
 
+    private var readerJob: Job? = null
+
+    /**
+     * Reader view. When the page holds little text or shows a paywall, the article is also
+     * fetched the way search engines and archives see it (no cookies, no scripts) and the
+     * longest version wins.
+     */
     fun openReader(tab: Tab? = current) {
         val t = tab ?: return
         val wv = t.webView ?: return
+        if (readerJob?.isActive == true) return
+        val url = t.url
+        val ua = wv.settings.userAgentString
         wv.evaluateJavascript(Scripts.READER) { raw ->
-            val doc = ReaderDoc.parse(Scripts.unwrap(raw), t.url)
-            if (doc != null) reader = doc else notify("Reader isn't available for this page")
+            val doc = ReaderDoc.parse(Scripts.unwrap(raw), url)
+            if (doc != null && !doc.paywall && doc.words >= 350) {
+                reader = doc
+                return@evaluateJavascript
+            }
+            if (!url.startsWith("https://") && !url.startsWith("http://")) {
+                if (doc != null) reader = doc else notify("Reader isn't available for this page")
+                return@evaluateJavascript
+            }
+            notify("Getting the whole article…")
+            readerJob = scope.launch {
+                var best = doc
+                for (html in Reader.fetchVersions(url, ua)) {
+                    if (t.webView !== wv || t.url != url) return@launch
+                    val other = withTimeoutOrNull(8000) {
+                        suspendCancellableCoroutine<ReaderDoc?> { c ->
+                            wv.evaluateJavascript(Scripts.readerOf(html, url)) { r -> c.resume(ReaderDoc.parse(Scripts.unwrap(r), url)) }
+                        }
+                    } ?: continue
+                    if (best == null || other.textWords > best.textWords * 1.2 + 20) best = other.copy(hero = other.hero.ifEmpty { best?.hero.orEmpty() })
+                }
+                if (t.webView !== wv || t.url != url || current !== t) return@launch
+                when {
+                    best == null -> notify("Reader isn't available for this page")
+                    else -> {
+                        reader = best
+                        if (best === doc && best.paywall) notify("This site only sends the start of the article to subscribers")
+                    }
+                }
+            }
         }
     }
 
@@ -1299,10 +1347,62 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     }
 
     private fun openFromOutside(input: String) {
+        val before = current
         val t = blankTab()
+        if (t !== before) t.fromOutside = true
         val resolved = Url.resolve(input, settings.engine)
         // Other apps may only hand us web pages; anything else becomes a search.
         navigate(if (resolved.startsWith("https://") || resolved.startsWith("http://")) resolved else Url.search(input, settings.engine), t)
+    }
+
+    /**
+     * A tapped link to another site that has an app on this device (LinkedIn, Spotify, …) opens in
+     * that app, like it does in Chrome. Links within the site you're on stay in Orbit, so browsing
+     * a site here doesn't keep throwing you into its app, and ghost tabs never leave Orbit.
+     */
+    private fun opensInApp(tab: Tab, request: WebResourceRequest): Boolean {
+        if (!settings.openInApps || tab.ghost) return false
+        val now = System.currentTimeMillis()
+        if (request.hasGesture()) tab.gestureAt = now
+        val fresh = tab.pageHost == null
+        val tapped = request.hasGesture() || ((request.isRedirect || fresh) && now - tab.gestureAt < 5000)
+        if (!tapped) return false
+        val host = request.url.host?.lowercase() ?: return false
+        val from = tab.pageHost ?: tabs.firstOrNull { it.id == tab.parentId }?.pageHost
+        if (from != null && Url.site(from) == Url.site(host)) return false
+        if (!flowAllows(request.url.toString())) return false
+        if (!openInApp(request.url)) return false
+        tab.gestureAt = 0L
+        // A new tab that only existed for this link goes away once the app has it.
+        if (fresh && tab.parentId != null) main.post { if (tab in tabs) closeTab(tab, undoable = false) }
+        return true
+    }
+
+    /** Opens a web link in the app (not a browser, not Orbit) that handles it; false if there's none. */
+    private fun openInApp(uri: Uri): Boolean {
+        val intent = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
+        if (Build.VERSION.SDK_INT >= 30) {
+            // Only an app that is set to open these links (Settings > Apps > Open by default); the
+            // system refuses when just browsers can.
+            intent.addFlags(Intent.FLAG_ACTIVITY_REQUIRE_NON_BROWSER)
+        } else {
+            val pm = activity.packageManager
+            val browsers = pm.queryIntentActivities(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://example.invalid/")).addCategory(Intent.CATEGORY_BROWSABLE), 0,
+            ).mapTo(HashSet()) { it.activityInfo.packageName }
+            val apps = pm.queryIntentActivities(intent, 0).map { it.activityInfo.packageName }
+                .filter { it != activity.packageName && it !in browsers }.distinct()
+            if (apps.size != 1) return false
+            intent.setPackage(apps.single())
+        }
+        return try {
+            activity.startActivity(intent)
+            true
+        } catch (e: ActivityNotFoundException) {
+            false
+        } catch (e: SecurityException) {
+            false
+        }
     }
 
     private fun openExternal(url: String): Boolean = try {
@@ -1471,27 +1571,178 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
     }
 
     private fun download(tab: Tab, url: String, ua: String?, disposition: String?, mime: String?, confirmed: Boolean = false) {
-        if (!url.startsWith("http")) return notify("Can't download this file")
+        val wv = tab.webView
+        // A tab that only opened to fetch this file (a link from another app, or one that opened
+        // a new tab) has no page to show, so it goes away instead of staying blank.
+        if (wv != null && wv.copyBackForwardList().size == 0) main.post { leaveEmptyTab(tab) }
+        when {
+            url.startsWith("blob:") || url.startsWith("data:") -> downloadFromPage(tab, url, disposition, mime)
+            url.startsWith("https://") || url.startsWith("http://") -> downloadFromWeb(tab, url, ua, disposition, mime, confirmed)
+            else -> notify("Can't download this file")
+        }
+    }
+
+    private fun leaveEmptyTab(tab: Tab) {
+        if (tab !in tabs || tab.webView?.copyBackForwardList()?.size != 0) return
+        if (tab.parentId != null || tab.fromOutside) {
+            tab.showHome = true
+            closeTab(tab, undoable = false)
+        } else if (tab.startedFromHome) {
+            tab.showHome = true
+        }
+    }
+
+    private val downloadManager get() = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+
+    private fun downloadFromWeb(tab: Tab, url: String, ua: String?, disposition: String?, mime: String?, confirmed: Boolean) {
         // Android's download manager is a separate app: it can't go through Orbit VPN.
         if (Vpn.enabled && !confirmed) {
-            return notify("Downloads don't go through Orbit VPN", "Download") { download(tab, url, ua, disposition, mime, confirmed = true) }
+            return notify("Downloads don't go through Orbit VPN", "Download") { downloadFromWeb(tab, url, ua, disposition, mime, confirmed = true) }
         }
-        runCatching {
-            val name = URLUtil.guessFileName(url, disposition, mime)
+        val name = Downloads.fileName(url, disposition, mime)
+        val type = Downloads.mimeFor(name, mime)
+        val id = runCatching {
             val req = DownloadManager.Request(Uri.parse(url)).apply {
-                setMimeType(mime)
-                addRequestHeader("User-Agent", ua)
+                setMimeType(type)
+                addRequestHeader("User-Agent", ua?.takeIf { it.isNotBlank() } ?: mobileUa)
                 cookiesFor(tab).getCookie(url)?.let { addRequestHeader("Cookie", it) }
+                // Many file hosts only hand files to visitors coming from their own pages.
+                tab.webView?.url?.takeIf { (it.startsWith("https://") || it.startsWith("http://")) && it != url }
+                    ?.let { addRequestHeader("Referer", it) }
                 setTitle(name)
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
             }
-            (activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(req)
-            notify("Downloading $name")
-        }.onFailure { notify("Download failed") }
+            downloadManager.enqueue(req)
+        }.getOrElse { return notify("Couldn't download $name") }
+        notify("Downloading $name")
+        watchDownload(id, name)
+    }
+
+    /** Tells you when the download manager is done with [id], with a way to open the file. */
+    private fun watchDownload(id: Long, name: String) {
+        scope.launch {
+            val until = System.currentTimeMillis() + 6 * 3_600_000L
+            while (System.currentTimeMillis() < until) {
+                delay(1000)
+                val status = withContext(Dispatchers.IO) {
+                    runCatching {
+                        downloadManager.query(DownloadManager.Query().setFilterById(id)).use { c ->
+                            if (c.moveToFirst()) c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) else -1
+                        }
+                    }.getOrDefault(-1)
+                }
+                when (status) {
+                    DownloadManager.STATUS_SUCCESSFUL -> {
+                        val uri = runCatching { downloadManager.getUriForDownloadedFile(id) }.getOrNull()
+                        val type = runCatching { downloadManager.getMimeTypeForDownloadedFile(id) }.getOrNull()
+                        if (uri == null) notify("Downloaded $name")
+                        else notify("Downloaded $name", "Open") { openDownload(uri, type) }
+                        return@launch
+                    }
+                    DownloadManager.STATUS_FAILED -> {
+                        notify("Couldn't download $name")
+                        return@launch
+                    }
+                    -1 -> return@launch // Cancelled from the notification.
+                }
+            }
+        }
+    }
+
+    private fun openDownload(uri: Uri, mime: String?) {
+        if (!Downloads.open(activity, uri, mime)) notify("No app on this phone opens this file")
+    }
+
+    /** A file the page made itself (blob: or data:), being read from the page. */
+    private class PageDownload(val tab: Tab, val url: String, val disposition: String?, val mime: String?, val file: File) {
+        var out: OutputStream? = null
+        var name = ""
+        var type = ""
+        var size = 0L
+        var expected = 0L
+    }
+
+    private val pageDownloads = HashMap<String, PageDownload>()
+
+    private fun downloadFromPage(tab: Tab, url: String, disposition: String?, mime: String?) {
+        val wv = tab.webView ?: return
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return notify("Can't download this file")
+        val id = UUID.randomUUID().toString()
+        val file = File(activity.cacheDir, "download-$id")
+        pageDownloads[id] = PageDownload(tab, url, disposition, mime, file)
+        wv.evaluateJavascript(Downloads.readScript(url, id)) { r ->
+            if (Scripts.unwrap(r) != "ok") pageDownloadFailed(id)
+        }
+        // A page that never answers doesn't keep the slot forever.
+        main.postDelayed({ if (pageDownloads[id]?.out == null) pageDownloadFailed(id) }, 30_000)
+    }
+
+    private fun pageDownloadFailed(id: String, text: String = "Couldn't download this file") {
+        val d = pageDownloads.remove(id) ?: return
+        runCatching { d.out?.close() }
+        d.file.delete()
+        notify(text)
+    }
+
+    /** Pieces of page files (see [Downloads.readScript]); only for downloads Orbit asked for. */
+    private fun installDownloadBridge(wv: WebView, tab: Tab) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return
+        runCatching {
+            WebViewCompat.addWebMessageListener(wv, "OrbitDownload", setOf("*")) { _, message, _, isMainFrame, _ ->
+                if (isMainFrame) onPageDownloadMessage(tab, message.data)
+            }
+        }
+    }
+
+    private fun onPageDownloadMessage(tab: Tab, data: String?) {
+        val o = runCatching { JSONObject(data ?: return) }.getOrNull() ?: return
+        val id = o.optString("id")
+        val d = pageDownloads[id]?.takeIf { it.tab === tab } ?: return
+        when {
+            o.has("error") -> pageDownloadFailed(id, if (o.optString("error") == "big") "This file is too big to download" else "Couldn't download this file")
+            o.has("start") -> {
+                if (d.out != null) return
+                d.type = o.optString("type")
+                d.expected = o.optLong("size")
+                d.name = Downloads.fileName(d.url, d.disposition, d.type.ifEmpty { d.mime }, o.optString("name"))
+                d.out = runCatching { d.file.outputStream().buffered() }.getOrNull() ?: return pageDownloadFailed(id)
+                notify("Downloading ${d.name}")
+            }
+            o.has("data") -> {
+                val out = d.out ?: return pageDownloadFailed(id)
+                val bytes = runCatching { Base64.decode(o.optString("data"), Base64.DEFAULT) }.getOrNull() ?: return pageDownloadFailed(id)
+                d.size += bytes.size
+                if (d.size > d.expected || d.size > Downloads.MAX_PAGE_FILE) return pageDownloadFailed(id)
+                runCatching { out.write(bytes) }.onFailure { pageDownloadFailed(id) }
+            }
+            o.has("done") -> {
+                pageDownloads.remove(id)
+                val closed = runCatching { d.out?.close() }.isSuccess
+                if (d.out == null || !closed || d.size != d.expected) {
+                    d.file.delete()
+                    return notify("Couldn't download this file")
+                }
+                val type = Downloads.mimeFor(d.name, d.type.ifEmpty { d.mime })
+                scope.launch {
+                    val uri = withContext(Dispatchers.IO) { Downloads.save(activity, d.file, d.name, type).also { d.file.delete() } }
+                    if (uri == null) notify("Couldn't save ${d.name}")
+                    else notify("Downloaded ${d.name}", "Open") { openDownload(uri, type) }
+                }
+            }
+        }
     }
 
     fun downloadUrl(url: String, tab: Tab) = download(tab, url, mobileUa, null, null)
+
+    /** The page scrolls, and is scrolled (to within a couple of pixels) to its very end. */
+    private fun atEnd(wv: WebView): Boolean {
+        if (!wv.canScrollVertically(-1)) return false
+        if (!wv.canScrollVertically(1)) return true
+        @Suppress("DEPRECATION")
+        val bottom = (wv.contentHeight * wv.scale).toInt() - wv.height
+        return bottom > 0 && wv.scrollY >= bottom - 2 * activity.resources.displayMetrics.density
+    }
 
     /**
      * The only page -> app channel. Messages are accepted only from the top frame of the page the
@@ -1709,6 +1960,8 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         }
         applyWebSettings(wv, tab)
         installBridge(wv, tab)
+        installDownloadBridge(wv, tab)
+        if (docStartScripts) runCatching { WebViewCompat.addDocumentStartJavaScript(wv, Downloads.PAGE_HOOK, setOf("*")) }
         installMediaBridge(wv, tab)
         installShields(wv, tab)
         // Registered on the WebView object, so it exists from here on.
@@ -1720,8 +1973,16 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
         }
 
         wv.setOnScrollChangeListener { _, _, y, _, oldY ->
-            if (!settings.collapseOnScroll || tab.id != currentId) return@setOnScrollChangeListener
+            if (tab.id != currentId) return@setOnScrollChangeListener
             val dy = y - oldY
+            // At the end of the page the whole bar shows, and the page moves up so the footer isn't under it.
+            val end = dy >= 0 && atEnd(wv)
+            if (end != pageAtEnd) pageAtEnd = end
+            if (end) {
+                barCollapsed = false
+                return@setOnScrollChangeListener
+            }
+            if (!settings.collapseOnScroll) return@setOnScrollChangeListener
             if (y <= 0) barCollapsed = false
             else if (dy > 14) barCollapsed = true
             else if (dy < -24) barCollapsed = false
@@ -1767,6 +2028,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
                         offerHttp(tab, host, url)
                         return true
                     }
+                    if (opensInApp(tab, request)) return true
                     val target = linkFor(url)
                     // A site that adds a removed parameter back gets its way, rather than a loop.
                     if (target != null && !(request.isRedirect && target == tab.cleanedUrl)) {
@@ -1806,6 +2068,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
             }
 
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                if (tab.id == currentId) pageAtEnd = false
                 val newHost = Url.host(url)
                 if (newHost == null || tab.pageHost == null || Url.site(newHost) != Url.site(tab.pageHost!!)) tab.favicon = null
                 tab.url = url
@@ -1890,6 +2153,7 @@ class Browser(private val activity: ComponentActivity, private val scope: Corout
             override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
                 if (!isUserGesture) return false
                 val child = Tab(spaceId = tab.spaceId, ghost = tab.ghost, parentId = tab.id)
+                child.gestureAt = System.currentTimeMillis()
                 child.showHome = false
                 child.startedFromHome = false
                 val parentIndex = tabs.indexOf(tab)

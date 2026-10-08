@@ -14,6 +14,18 @@ import android.app.Activity
 import android.view.View
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -225,19 +237,32 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
     val barTone = if (page && !overlay) topTint else Orb.Bg
     StatusBarIcons(light = barTone.luminance() > 0.55f, lightNav = !Orb.palette.dark)
 
+    val barVisible = !pulse && !deck && !adjustWallpaper && !browser.findOpen && browser.reader == null && !(imeVisible && page)
+    // At the end of a page it moves up by what covers its bottom (the bar, or the navigation bar
+    // when the bar is at the top), so the footer can be read. Moving it doesn't reflow the page.
+    var rootHeight by remember { mutableIntStateOf(0) }
+    var barTopY by remember { mutableFloatStateOf(0f) }
+    val navBottom = WindowInsets.navigationBars.getBottom(density)
+    val liftTarget = when {
+        !page || !browser.pageAtEnd || imeVisible -> 0f
+        barVisible && !barTop && barTopY > 0f -> (rootHeight - barTopY).coerceAtLeast(0f)
+        else -> navBottom.toFloat()
+    }
+    val lift by animateFloatAsState(liftTarget, spring(stiffness = Spring.StiffnessMediumLow), label = "lift")
+
     CompositionLocalProvider(LocalAccent provides accent) {
         Box(
             Modifier
                 .fillMaxSize()
                 .background(Orb.Bg)
-                .onSizeChanged { radial.rootWidth = it.width.toFloat() },
+                .onSizeChanged { radial.rootWidth = it.width.toFloat(); rootHeight = it.height },
         ) {
             Column(Modifier.fillMaxSize().imePadding()) {
                 if (page) Spacer(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(topTint))
                 // A bar at the top sits above the page instead of floating over it.
                 if (barTop && page) Spacer(Modifier.fillMaxWidth().height(TopBarSpace).background(topTint))
-                Box(Modifier.weight(1f).fillMaxWidth()) {
-                    if (tab != null && !tab.showHome) WebHost(tab.webView, Modifier.fillMaxSize())
+                Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
+                    if (tab != null && !tab.showHome) WebHost(tab.webView, Modifier.fillMaxSize().offset { IntOffset(0, -lift.roundToInt()) })
                     if (tab != null && !tab.showHome && !tab.painted) LoadingVeil(tab)
                     if (tab != null && !tab.showHome && Vpn.enabled && Vpn.state != Vpn.State.ON) VpnVeil { open(SheetKind.Vpn) }
                     if (tab != null && tab.showHome) {
@@ -257,7 +282,6 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
                 }
             }
 
-            val barVisible = !pulse && !deck && !adjustWallpaper && !browser.findOpen && browser.reader == null && !(imeVisible && page)
             // Rebuilt when the bar moves, so its window-inset padding switches sides.
             key(barTop) {
                 AnimatedVisibility(
@@ -265,7 +289,7 @@ fun BrowserScreen(browser: Browser, onExit: () -> Unit) {
                     enter = slideInVertically { if (barTop) -it else it } + fadeIn(),
                     exit = slideOutVertically { if (barTop) -it else it } + fadeOut(),
                     modifier = if (barTop) Modifier.align(Alignment.TopCenter).statusBarsPadding()
-                    else Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
+                    else Modifier.align(Alignment.BottomCenter).navigationBarsPadding().onGloballyPositioned { barTopY = it.boundsInRoot().top },
                 ) {
                     OrbitBar(
                         tab = tab,

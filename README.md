@@ -85,8 +85,11 @@ Release signing certificate SHA-256:
   `!gh` and other bangs; `>commands`; `@spaces`; open tabs and history; voice input.
 - **Tabs grouped by site:** several tabs on one site become one stack in the tab switcher; tap
   it to see them all.
-- **Preview** a link in a card, **Reader view**, **Hide elements** on any page, **Tab history**,
-  find in page, desktop mode and dark websites.
+- **Preview** a link in a card, **Reader view** (which also finds the whole article when a page
+  only shows its start), **Hide elements** on any page, **Tab history**, find in page, desktop
+  mode and dark websites.
+- **Links open in your apps:** a tapped link to LinkedIn, YouTube, Spotify and other sites with an
+  app on your phone opens in that app (Settings → Browsing; never from ghost tabs).
 - **Extensions:** user scripts, the kind made for Tampermonkey and Greasemonkey, change how sites
   look and work. Tap *Install* on Greasy Fork (or open any `.user.js` link), confirm, and switch
   each one on or off from the ⋯ menu. They don't run in ghost tabs. (Android's WebView can't run
@@ -130,7 +133,7 @@ how Orbit is hardened and how to report a vulnerability privately.
   country, and it doesn't support bridges. Downloads are handled by Android, outside the VPN
   (Orbit asks first).
 - Site requests for the camera, microphone and location are always refused.
-- `blob:` downloads aren't supported yet.
+- Reader view can't get past hard paywalls: some sites only send subscribers the whole article.
 - Spaces and ghost tabs need WebView 121+ for separate cookie jars (the app says so if not).
 
 ## Build from source

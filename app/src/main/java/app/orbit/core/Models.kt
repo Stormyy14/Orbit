@@ -128,6 +128,8 @@ data class Settings(
     ),
     /** Keep video and music playing with Orbit in the background, with media controls. */
     val backgroundPlay: Boolean = true,
+    /** Links to sites with an app on this device (LinkedIn, Spotify, …) open in that app. */
+    val openInApps: Boolean = true,
     /** Satellite: a handle on the side of the screen that fans out your favorite sites. */
     val satellite: Boolean = false,
     /** Which edge the Satellite handle sits on, and how far down (0 = top, 1 = bottom). */
@@ -197,6 +199,7 @@ data class Settings(
         .put("collapse", collapseOnScroll)
         .put("flow", JSONArray(flowDomains))
         .put("bgPlay", backgroundPlay)
+        .put("apps", openInApps)
         .put("satellite", satellite)
         .put("satLeft", satelliteLeft)
         .put("satY", satelliteY.toDouble())
@@ -243,6 +246,7 @@ data class Settings(
                 collapseOnScroll = o.optBoolean("collapse", d.collapseOnScroll),
                 flowDomains = o.optJSONArray("flow")?.let { a -> List(a.length()) { a.getString(it) } } ?: d.flowDomains,
                 backgroundPlay = o.optBoolean("bgPlay", d.backgroundPlay),
+                openInApps = o.optBoolean("apps", d.openInApps),
                 satellite = o.optBoolean("satellite", d.satellite),
                 satelliteLeft = o.optBoolean("satLeft", d.satelliteLeft),
                 satelliteY = o.optDouble("satY", d.satelliteY.toDouble()).toFloat().coerceIn(0f, 1f),
